@@ -1,5 +1,7 @@
 # My Web Intelligence (MyWI)
 
+This README is also available in French: [README_fr.md](README_fr.md)
+
 MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers in digital humanities with creating and managing web-based research projects. It facilitates the collection, organization, and analysis of web data, storing information in a SQLite database. For browsing the database, a tool like [SQLiteBrowser](https://sqlitebrowser.org/) can be very helpful.
 
 ## Table of Contents
@@ -106,9 +108,9 @@ Provider-specific keys:
   
 Notes:
 - OpenAI/Mistral expect payload `{ "model": name, "input": [texts...] }` and return `{ "data": [{"embedding": [...]}, ...] }`.
-- Gemini utilise `:batchEmbedContents` et renvoie `{ "embeddings": [{"values": [...]}, ...] }`.
-- Hugging Face accepte `{ "inputs": [texts...] }` et renvoie typiquement une liste de vecteurs.
-- Ollama (local) ne batch pas: appels séquentiels à `/api/embeddings` avec `{ "model": name, "prompt": text }`.
+- Gemini uses `:batchEmbedContents` and returns `{ "embeddings": [{"values": [...]}, ...] }`.
+- Hugging Face accepts `{ "inputs": [texts...] }` and typically returns a list of vectors.
+- Ollama (local) does not batch: sequential calls to `/api/embeddings` with `{ "model": name, "prompt": text }`.
 
 #### Optional: OpenRouter Relevance Gate (AI yes/no filter)
 
@@ -203,12 +205,12 @@ docker compose down        # stop
 docker compose down -v     # stop and remove volumes (destructive)
 ```
 
-Choisir l’emplacement des données — cas courants
-- Cas A (par défaut, le plus simple) : laissez `HOST_DATA_DIR=./data` dans `.env`. Rien d’autre à faire.
-- Cas B (en dehors du dépôt) : définissez un chemin absolu dans `.env`, par ex. :
-  - macOS/Linux : `HOST_DATA_DIR=/Users/alice/mywi_data`
-  - Windows : `HOST_DATA_DIR=C:/Users/Alice/mywi_data`
-  Puis lancez `docker compose up -d --build` et utilisez la CLI comme ci‑dessus.
+Choosing the data location — common cases
+- Case A (default, simplest): leave `HOST_DATA_DIR=./data` in `.env`. Nothing else to do.
+- Case B (outside the repo): set an absolute path in `.env`, e.g.:
+  - macOS/Linux: `HOST_DATA_DIR=/Users/alice/mywi_data`
+  - Windows: `HOST_DATA_DIR=C:/Users/Alice/mywi_data`
+  Then run `docker compose up -d --build` and use the CLI as shown above.
 
 ### Using Docker (manual)
 
@@ -231,9 +233,9 @@ Choisir l’emplacement des données — cas courants
     cd MyWebIntelligencePython
     ```
 
-3.  **Configurer l’emplacement des données (optionnel) :**
-    Pour un·e débutant·e, le plus simple est de monter votre dossier hôte sur `/app/data`. Le chemin par défaut de l’app est `data` → il pointe alors vers `/app/data`. Aucune modification de code n’est nécessaire.
-    - Cas 1 (recommandé) : monter vers `/app/data` (zéro modification)
+3.  **Configure the data location (optional):**
+    For beginners, the simplest approach is to mount your host folder at `/app/data`. The app’s default path is `data` → it resolves to `/app/data`. No code changes are required.
+    - Case 1 (recommended): mount to `/app/data` (no changes)
       - macOS/Linux :
         ```bash
         mkdir -p ~/mywi_data
@@ -241,13 +243,13 @@ Choisir l’emplacement des données — cas courants
           -v ~/mywi_data:/app/data \
           mwi:latest
         ```
-      - Windows :
+      - Windows:
         ```powershell
         docker run -dit --name mwi `
           -v C:/Users/you/mywi_data:/app/data `
           mwi:latest
         ```
-    - Cas 2 (avancé) : utiliser un autre chemin interne et l’indiquer à l’app
+    - Case 2 (advanced): use a different internal path and tell the app
       ```bash
       docker run -dit --name mwi \
         -e MYWI_DATA_DIR=/data \
@@ -867,51 +869,51 @@ Typical flow
 
 Quick guidelines for speed vs. quality:
 
-- Petite/moyenne taille (≤ ~50k paragraphes)
-  - Méthode simple et rapide: `cosine` avec `--threshold=0.85` et `--minrel=1`.
-  - Exemple:
+- Small/medium size (≤ ~50k paragraphs)
+  - Simple and fast method: `cosine` with `--threshold=0.85` and `--minrel=1`.
+  - Example:
     ```bash
     python mywi.py embedding similarity --name=LAND --method=cosine \
       --threshold=0.85 --minrel=1
     ```
 
-- Grande taille (≥ ~100k paragraphes)
-  - Préférer `cosine_lsh` (approx) et borner la fan‑out + la sortie:
-    - `--lshbits=18–22` (20 par défaut)
+- Large size (≥ ~100k paragraphs)
+  - Prefer `cosine_lsh` (approx) and bound the fan-out and output:
+    - `--lshbits=18–22` (20 default)
     - `--topk=10–20`
     - `--threshold=0.85–0.90`
     - `--minrel=1–2`
-    - `--maxpairs` pour borner le nombre total de paires (ex: 5–10M)
-  - Exemple:
+    - `--maxpairs` to cap the total number of pairs (e.g., 5–10M)
+  - Example:
     ```bash
     python mywi.py embedding similarity --name=LAND --method=cosine_lsh \
       --lshbits=20 --topk=15 --threshold=0.88 --minrel=1 --maxpairs=8000000
     ```
 
 - NLI (ANN + Cross‑Encoder)
-  - Utiliser FAISS pour le rappel si disponible: `--backend=faiss`.
-  - Commencer petit: `--topk=6–10`, `--minrel=1–2`, `--maxpairs=20k–200k`.
-  - Choisir le modèle:
-    - Smoke test/CPU rapide: DistilBERT MNLI (EN) → `typeform/distilbert-base-uncased-mnli`.
-    - Qualité multilingue: DeBERTa XNLI → `MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7` (nécessite `sentencepiece`).
-  - Ajuster:
-    - `nli_batch_size=32–96` selon RAM.
-    - `nli_max_tokens=384–512` si vous voulez couper un peu plus pour la vitesse.
-  - Exemple:
+  - Use FAISS for recall if available: `--backend=faiss`.
+  - Start small: `--topk=6–10`, `--minrel=1–2`, `--maxpairs=20k–200k`.
+  - Choose the model:
+    - Smoke test/quick CPU: DistilBERT MNLI (EN) → `typeform/distilbert-base-uncased-mnli`.
+    - Multilingual quality: DeBERTa XNLI → `MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7` (requires `sentencepiece`).
+  - Tune:
+    - `nli_batch_size=32–96` depending on RAM.
+    - `nli_max_tokens=384–512` if you want to truncate a bit more for speed.
+  - Example:
     ```bash
     python mywi.py embedding similarity --name=LAND --method=nli \
       --backend=faiss --topk=8 --minrel=2 --maxpairs=20000
     ```
 
-- CPU & threads (dans votre venv)
-  - Fixer les threads: `export OMP_NUM_THREADS=N` (FAISS/Torch/NumPy),
-    et `settings.py:nli_torch_num_threads = N` (intra‑op Torch).
-  - Règle simple: N = (cœurs dispo − 1) pour garder un peu de marge système.
-  - Garder `TOKENIZERS_PARALLELISM=false` pour éviter les surcharges inutiles.
+- CPU & threads (in your venv)
+  - Set threads: `export OMP_NUM_THREADS=N` (FAISS/Torch/NumPy),
+    and `settings.py:nli_torch_num_threads = N` (Torch intra‑op).
+  - Rule of thumb: N = (available cores − 1) to keep system headroom.
+  - Keep `TOKENIZERS_PARALLELISM=false` to avoid unnecessary overhead.
 
-- Débits & logs
-  - Suivre la progression toutes les `nli_progress_every_pairs` paires, avec débit (pairs/s) et ETA.
-  - Si débit faible, baisser `nli_max_tokens` ou `nli_batch_size`, et/ou relever `--minrel`.
+- Throughput & logs
+  - Track progress every `nli_progress_every_pairs` pairs, with throughput (pairs/s) and ETA.
+  - If throughput is low, lower `nli_max_tokens` or `nli_batch_size`, and/or raise `--minrel`.
 
 ### Model Choice and Fallbacks
 
