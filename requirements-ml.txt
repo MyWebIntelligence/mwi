@@ -1,0 +1,10 @@
+# Optional ML extras (install in addition to requirements.txt)
+# Enables ANN + NLI (FAISS + transformers/sentencepiece/torch)
+
+torch>=2.2
+transformers>=4.40
+tokenizers>=0.15
+sentencepiece>=0.1.99
+sentence-transformers>=2.6
+faiss-cpu>=1.12.0
+

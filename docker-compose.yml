@@ -1,0 +1,85 @@
+version: "3.9"
+
+# -----------------------------------------------------------------------------
+# MyWebIntelligence — Docker Compose
+# -----------------------------------------------------------------------------
+# Objectif
+# - Démarrer l’app rapidement avec un dossier de données persistant sur l’hôte.
+# - Aucune modification de code requise pour choisir l’emplacement des données.
+#
+# Où vont les données ?
+# - Côté hôte (votre machine) : variable .env `HOST_DATA_DIR` (par défaut ./data)
+# - Côté conteneur : chemin fixe /app/data (recommandé)
+# - L’app utilise `settings.data_location` qui vaut "data" par défaut et 
+#   se résout côté conteneur vers /app/data. On peut aussi surcharger avec
+#   l’ENV `MYWI_DATA_DIR` (déjà positionnée ci‑dessous).
+#
+# Exemples de .env (copier .env.example → .env) :
+#   # Par défaut, stocker dans ./data du dépôt
+#   HOST_DATA_DIR=./data
+#   
+#   # macOS/Linux – dossier en dehors du dépôt
+#   # HOST_DATA_DIR=/Users/vous/mywi_data
+#   
+#   # Windows – dossier en dehors du dépôt
+#   # HOST_DATA_DIR=C:/Users/Vous/mywi_data
+#
+# Commandes utiles :
+#   docker compose up -d --build
+#   docker compose exec mwi python mywi.py db setup
+#   docker compose exec mwi python mywi.py land crawl --name=LAND
+# -----------------------------------------------------------------------------
+
+services:
+  mwi:
+    build:
+      context: .
+      args:
+        # Build-time toggles (optional)
+        # WITH_ML=1 pour installer les extras ML (FAISS + transformers)
+        - WITH_ML=${MYWI_WITH_ML:-0}
+        # WITH_PLAYWRIGHT_BROWSERS=1 pour pré-installer les navigateurs Playwright
+        - WITH_PLAYWRIGHT_BROWSERS=${MYWI_WITH_PLAYWRIGHT_BROWSERS:-0}
+    image: mwi:latest
+    container_name: mwi
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=${TZ:-UTC}
+      # Chemin interne utilisé par l’app (ne pas changer sauf besoin avancé)
+      # settings.py lit MYWI_DATA_DIR (fallback sur "data") → /app/data
+      - MYWI_DATA_DIR=/app/data
+    volumes:
+      # Mappage volume : HOST:CONTAINER
+      # - Gauche (HOST_DATA_DIR) : dossier sur votre machine (défaut ./data)
+      # - Droite (/app/data)     : dossier interne attendu par l’app
+      - ${HOST_DATA_DIR:-./data}:/app/data
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    command: ["tail", "-f", "/dev/null"]
+
+  # Optional: one-shot helper to install Playwright browsers post-build
+  # Use: docker compose run --rm playwright-setup
+  playwright-setup:
+    image: mwi:latest
+    depends_on:
+      - mwi
+    environment:
+      - MYWI_DATA_DIR=/app/data
+    volumes:
+      # Utilise le même dossier de données que le service principal
+      - ${HOST_DATA_DIR:-./data}:/app/data
+    entrypoint: ["python", "install_playwright.py"]
+    profiles: ["tools"]
+
+  # Optional: ephemeral runner for direct commands without attaching to mwi
+  # Use: docker compose run --rm mwi-run python mywi.py db setup
+  mwi-run:
+    image: mwi:latest
+    environment:
+      - MYWI_DATA_DIR=/app/data
+    volumes:
+      # Runner éphémère pour exécuter une commande ponctuelle
+      - ${HOST_DATA_DIR:-./data}:/app/data
+    entrypoint: ["bash", "-lc"]
+    profiles: ["tools"]
