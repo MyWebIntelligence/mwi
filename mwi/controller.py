@@ -24,9 +24,39 @@ class DbController:
         """
         Exécute les migrations de base de données.
         """
-        from migrations.migrate import MigrationManager
+        # Support both 'migrations' and hidden '.migrations' package locations
+        MigrationManager = None
+        try:
+            from migrations.migrate import MigrationManager as _MM  # type: ignore
+            MigrationManager = _MM
+        except Exception:
+            import importlib.util, os
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+            module_path = os.path.join(repo_root, '.migrations', 'migrate.py')
+            if os.path.exists(module_path):
+                spec = importlib.util.spec_from_file_location('dot_migrations_migrate', module_path)
+                migrate_module = importlib.util.module_from_spec(spec)
+                assert spec and spec.loader
+                spec.loader.exec_module(migrate_module)  # type: ignore
+                MigrationManager = getattr(migrate_module, 'MigrationManager', None)
+        if MigrationManager is None:
+            print("[migrate] Error: unable to locate migration manager module")
+            return 0
         manager = MigrationManager()
         manager.run_pending_migrations()
+
+        # Filet de sécurité ad hoc: s'assurer que les nouvelles colonnes LLM existent
+        try:
+            cols = [row[1] for row in model.DB.execute_sql("PRAGMA table_info('expression')").fetchall()]
+            if 'validllm' not in cols:
+                model.DB.execute_sql("ALTER TABLE expression ADD COLUMN validllm TEXT DEFAULT NULL")
+                print("[migrate] Added missing column expression.validllm")
+            if 'validmodel' not in cols:
+                model.DB.execute_sql("ALTER TABLE expression ADD COLUMN validmodel TEXT DEFAULT NULL")
+                print("[migrate] Added missing column expression.validmodel")
+        except Exception as e:
+            # Non bloquant: on loggue et on continue
+            print(f"[migrate] Warning: LLM columns check failed: {e}")
         return 1
 
     @staticmethod
@@ -466,6 +496,81 @@ class LandController:
                 return 1
             print('Invalid export type "%s" [%s]' % (args.type, ', '.join(valid_types)))
         return 0
+
+    @staticmethod
+    def llm_validate(args: core.Namespace):
+        """Validation de masse via OpenRouter pour un land.
+
+        Utilisation:
+          python mywi.py land llm validate --name=LAND [--limit=N]
+        """
+        core.check_args(args, 'name')
+
+        # Configuration OpenRouter
+        if not getattr(settings, 'openrouter_enabled', False):
+            print('OpenRouter non activé (settings.openrouter_enabled=False) — abandon')
+            return 0
+        if not settings.openrouter_api_key or not settings.openrouter_model:
+            print('OpenRouter: clé API ou modèle manquant — renseignez settings.openrouter_api_key et openrouter_model')
+            return 0
+
+        land = model.Land.get_or_none(model.Land.name == args.name)
+        if land is None:
+            print(f'Land "{args.name}" non trouvé')
+            return 0
+
+        limit = core.get_arg_option('limit', args, set_type=int, default=0)
+        force = bool(getattr(args, 'force', False))
+
+        # Expressions à valider: sans verdict ('oui'/'non') ET avec readable non NULL et suffisamment long
+        # Base condition on previous verdicts
+        verdict_cond = (
+            model.Expression.validllm.is_null(True)
+            | model.Expression.validllm.not_in(['oui', 'non'])
+        )
+        # If --force, also include those previously marked as 'non'
+        if force:
+            verdict_cond = verdict_cond | (model.Expression.validllm == 'non')
+
+        q = (model.Expression
+             .select()
+             .where(
+                 (model.Expression.land == land)
+                 & verdict_cond
+                 & (
+                     model.Expression.readable.is_null(False)
+                     & (fn.LENGTH(model.Expression.readable) >= getattr(settings, 'openrouter_readable_min_chars', 0))
+                 )
+             )
+             .order_by(model.Expression.id))
+        if limit and limit > 0:
+            q = q.limit(limit)
+
+        from . import llm_openrouter as llm
+
+        total = 0
+        updated = 0
+        for expr in q:
+            total += 1
+            verdict = llm.is_relevant_via_openrouter(land, expr)
+            if verdict is True:
+                expr.validllm = 'oui'
+                expr.validmodel = settings.openrouter_model
+                expr.save(only=[model.Expression.validllm, model.Expression.validmodel])
+                updated += 1
+            elif verdict is False:
+                expr.validllm = 'non'
+                expr.validmodel = settings.openrouter_model
+                # Fixer la pertinence à 0 en cas de NON
+                expr.relevance = 0
+                expr.save(only=[model.Expression.validllm, model.Expression.validmodel, model.Expression.relevance])
+                updated += 1
+            else:
+                # verdict None: ne pas toucher
+                pass
+
+        print(f'Validation LLM terminée: examinées={total}, mises à jour={updated}, modèle={settings.openrouter_model}, force={force}')
+        return 1
 
 
 class EmbeddingController:

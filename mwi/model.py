@@ -83,6 +83,11 @@ class Expression(BaseModel):
     readable_at = DateTimeField(null=True, index=True)
     relevance = IntegerField(null=True)
     depth = IntegerField(null=True)
+    # LLM validation (OpenRouter gate)
+    # validllm stores 'oui'/'non' (fr) to reflect a binary verdict
+    validllm = CharField(max_length=3, null=True)
+    # validmodel stores the OpenRouter model slug used for the verdict
+    validmodel = CharField(max_length=100, null=True)
 
 
 class ExpressionLink(BaseModel):

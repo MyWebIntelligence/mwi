@@ -38,6 +38,12 @@ def command_input():
                         metavar='verb',
                         type=str,
                         help='Verb depending on target object')
+    # Optional sub-verb (e.g., `land llm validate`)
+    parser.add_argument('subverb',
+                        metavar='subverb',
+                        type=str,
+                        nargs='?',
+                        help='Optional sub-verb for nested commands')
     parser.add_argument('--land',
                         type=str,
                         help='Name of the land to work with')
@@ -118,6 +124,9 @@ def command_input():
                         type=int,
                         help='Max number of similarity pairs to insert (cap)',
                         nargs='?')
+    parser.add_argument('--force',
+                        action='store_true',
+                        help='Force include expressions with previous LLM verdict = non (for land llm validate)')
     args = parser.parse_args()
     # Always convert lang to a list
     if hasattr(args, "lang") and isinstance(args.lang, str):
@@ -150,6 +159,10 @@ def dispatch(args):
             'addurl':   LandController.addurl,
             'consolidate': LandController.consolidate,
             'medianalyse': LandController.medianalyse,
+            # Nested commands for LLM features
+            'llm': {
+                'validate': LandController.llm_validate,
+            },
         },
         'tag': {
             'export': TagController.export,
@@ -166,7 +179,14 @@ def dispatch(args):
     }
     controller = controllers.get(args.object)
     if controller:
-        return call(controller.get(args.verb), args)
+        action = controller.get(args.verb)
+        # Support nested verbs: e.g. controllers['land']['llm']['validate']
+        if isinstance(action, dict):
+            subverb = getattr(args, 'subverb', None)
+            if not subverb:
+                raise ValueError("Missing sub-verb for nested command (e.g. 'land llm validate')")
+            return call(action.get(subverb), args)
+        return call(action, args)
     raise ValueError("Invalid object {}".format(args.object))
 
 

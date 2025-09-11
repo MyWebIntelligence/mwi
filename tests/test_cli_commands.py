@@ -193,3 +193,55 @@ def test_cli_lang_list_handling(fresh_db):
     assert controller.LandController.create(core.Namespace(name=name, desc="x", lang=langs)) == 1
     land = model.Land.get(model.Land.name == name)
     assert land.lang == ",".join(langs)
+
+
+def test_land_llm_validate_cli(fresh_db, monkeypatch):
+    cli = fresh_db["cli"]
+    controller = fresh_db["controller"]
+    core = fresh_db["core"]
+    model = fresh_db["model"]
+
+    # Configure OpenRouter in settings
+    controller.settings.openrouter_enabled = True
+    controller.settings.openrouter_api_key = "sk-test"
+    controller.settings.openrouter_model = "openai/gpt-4o-mini"
+
+    # Create a land and a few expressions
+    name = rand_name("llm")
+    assert controller.LandController.create(core.Namespace(name=name, desc="d", lang=["fr"])) == 1
+    land = model.Land.get(model.Land.name == name)
+    # Add 3 expressions via core helper (creates domains as needed),
+    # and set readable to meet the min length filter.
+    minlen = getattr(controller.settings, 'openrouter_readable_min_chars', 0)
+    for i in range(3):
+        expr = core.add_expression(land, f"https://example.com/p{i}")
+        assert expr
+        text = ("Lorem ipsum ") * ((minlen // 12) + 2)
+        expr.readable = text
+        expr.save(only=[model.Expression.readable])
+
+    # Stub LLM verdicts: True, False, None
+    import mwi.llm_openrouter as llm
+    verdicts = iter([True, False, None])
+    monkeypatch.setattr(llm, "is_relevant_via_openrouter", lambda l, e: next(verdicts))
+
+    # Run: limit=2 should update only first 2
+    from argparse import Namespace
+    ret = cli.dispatch(Namespace(object="land", verb="llm", subverb="validate", name=name, limit=2))
+    assert ret == 1
+
+    # Check DB updates
+    updated = (model.Expression
+               .select()
+               .where((model.Expression.land == land) & (model.Expression.validllm.is_null(False))))
+    assert updated.count() == 2
+    vals = sorted([e.validllm for e in updated])
+    assert vals == ["non", "oui"]
+    for e in updated:
+        assert e.validmodel == controller.settings.openrouter_model
+    # 'non' should force relevance=0
+    non_expr = (model.Expression
+                .select()
+                .where((model.Expression.land == land) & (model.Expression.validllm == 'non'))
+                .get())
+    assert non_expr.relevance == 0

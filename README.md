@@ -65,6 +65,7 @@ mywi.py  →  mwi/cli.py  →  mwi/controller.py  →  mwi/core.py & mwi/export.
 - **Paragraph / ParagraphEmbedding / ParagraphSimilarity**: Paragraph store, embeddings, and semantic links (pseudolinks).
 - **Tag**: Hierarchical tags.
 - **TaggedContent**: Snippets tagged in Expressions.
+  - Expression extra fields: `validllm` (yes/no) and `validmodel` (OpenRouter model used)
 
 ### Main Workflows
 
@@ -125,6 +126,28 @@ Environment-configurable variables:
 - `MWI_OPENROUTER_MAX_CALLS_PER_RUN` (default `500`)
 
 Note: When disabled or not configured, the system behaves exactly as before.
+
+#### Bulk LLM Validation (yes/no)
+Validate relevance in bulk via OpenRouter and record the verdict in DB (`expression.validllm`, `expression.validmodel`).
+
+Command:
+```bash
+python mywi.py land llm validate --name=LAND [--limit N] [--force]
+```
+
+Requirements:
+- In `settings.py`: set `openrouter_enabled=True`, and provide `openrouter_api_key` and `openrouter_model`.
+- If your DB is old: `python mywi.py db migrate` (adds columns if missing).
+
+Behavior:
+- For each expression without a verdict, call the LLM to answer yes/no.
+- Saves `validllm` = `"oui"|"non"` (French) and `validmodel` = model slug.
+  - Filtering: only processes expressions with no "oui/non" verdict where `readable` is NOT NULL and has length ≥ `openrouter_readable_min_chars`.
+  - Respects `openrouter_readable_min_chars`, `openrouter_readable_max_chars` and `openrouter_max_calls_per_run`.
+  - If the verdict is `"non"`, the expression's `relevance` is set to `0`.
+
+`--force` option:
+- Also includes expressions with an existing `"non"` verdict in the selection (does not include `"oui"`).
 
 ### Testing
 

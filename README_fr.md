@@ -50,6 +50,7 @@ mywi.py  →  mwi/cli.py  →  mwi/controller.py  →  mwi/core.py & mwi/export.
 - Media (images/vidéos/audio)
 - Paragraph / ParagraphEmbedding / ParagraphSimilarity (pseudolinks)
 - Tag, TaggedContent
+ - Expression : champs additionnels `validllm` (oui/non) et `validmodel` (modèle OpenRouter)
 
 ### Workflows clés
 - Bootstrap DB : `python mywi.py db setup`
@@ -87,6 +88,28 @@ Clés spécifiques :
 #### Optionnel : Filtre de pertinence OpenRouter (LLM oui/non)
 - Variables : `MWI_OPENROUTER_ENABLED`, `MWI_OPENROUTER_API_KEY`, `MWI_OPENROUTER_MODEL`, `MWI_OPENROUTER_TIMEOUT`, `MWI_OPENROUTER_READABLE_MAX_CHARS`, `MWI_OPENROUTER_MAX_CALLS_PER_RUN`.
 - Désactivé → comportement identique à l’existant.
+
+##### Validation LLM en masse (oui/non)
+Valider en lot la pertinence via un LLM (OpenRouter) et enregistrer le verdict dans la base (`expression.validllm`, `expression.validmodel`).
+
+Commande :
+```bash
+python mywi.py land llm validate --name=LAND [--limit N] [--force]
+```
+
+Pré‑requis :
+- `settings.py` : `openrouter_enabled=True`, `openrouter_api_key` et `openrouter_model` renseignés.
+- Si votre DB est ancienne : `python mywi.py db migrate` (ajoute les colonnes si absentes).
+
+Effets :
+- Pour chaque expression sans verdict, effectue une requête LLM oui/non.
+- Renseigne `validllm` = `"oui"|"non"` et `validmodel` = slug du modèle.
+- Filtrage : traite uniquement les expressions sans verdict "oui/non" dont `readable` n’est PAS NULL et a une longueur ≥ `openrouter_readable_min_chars`.
+- Respecte `openrouter_readable_min_chars`, `openrouter_readable_max_chars` et `openrouter_max_calls_per_run`.
+- Si le verdict est `"non"`, la pertinence (`relevance`) de l’expression est forcée à `0`.
+
+Option `--force` :
+- Inclut également les expressions ayant déjà un verdict `"non"` dans la sélection à revalider (les `"oui"` ne sont pas inclus).
 
 ---
 
@@ -301,4 +324,3 @@ Il sauvegarde, tente `.recover` puis `.dump`, reconstruit une nouvelle DB et vé
 ## Licence
 
 Projet sous la licence indiquée dans le fichier LICENSE.
-
