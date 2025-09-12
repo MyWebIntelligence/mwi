@@ -24,21 +24,35 @@ class DbController:
         """
         Exécute les migrations de base de données.
         """
-        # Support both 'migrations' and hidden '.migrations' package locations
+        # Support 'migrations', 'migration' and hidden variants '.migrations' / '.migration'
         MigrationManager = None
+        # Try standard package imports first
         try:
             from migrations.migrate import MigrationManager as _MM  # type: ignore
             MigrationManager = _MM
         except Exception:
-            import importlib.util, os
-            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-            module_path = os.path.join(repo_root, '.migrations', 'migrate.py')
-            if os.path.exists(module_path):
-                spec = importlib.util.spec_from_file_location('dot_migrations_migrate', module_path)
-                migrate_module = importlib.util.module_from_spec(spec)
-                assert spec and spec.loader
-                spec.loader.exec_module(migrate_module)  # type: ignore
-                MigrationManager = getattr(migrate_module, 'MigrationManager', None)
+            try:
+                from migration.migrate import MigrationManager as _MM2  # type: ignore
+                MigrationManager = _MM2
+            except Exception:
+                # Fallback to file-based dynamic import in common locations
+                import importlib.util, os
+                repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+                candidate_paths = [
+                    os.path.join(repo_root, 'migrations', 'migrate.py'),
+                    os.path.join(repo_root, 'migration', 'migrate.py'),
+                    os.path.join(repo_root, '.migrations', 'migrate.py'),
+                    os.path.join(repo_root, '.migration', 'migrate.py'),
+                ]
+                for module_path in candidate_paths:
+                    if os.path.exists(module_path):
+                        spec = importlib.util.spec_from_file_location('mywi_migrations_migrate', module_path)
+                        migrate_module = importlib.util.module_from_spec(spec)
+                        assert spec and spec.loader
+                        spec.loader.exec_module(migrate_module)  # type: ignore
+                        MigrationManager = getattr(migrate_module, 'MigrationManager', None)
+                        if MigrationManager is not None:
+                            break
         if MigrationManager is None:
             print("[migrate] Error: unable to locate migration manager module")
             return 0

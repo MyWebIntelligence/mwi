@@ -1,0 +1,43 @@
+# Fichiers et répertoires cachés
+# Ignore tous les répertoires commençant par un point.
+.*/
+# Ignore les fichiers de configuration courants commençant par un point.
+.env
+
+# Fichiers de configuration locaux et secrets
+# Ces fichiers ne doivent jamais être partagés.
+settings.py
+secrets.txt
+
+# Base de données locale
+mwi.db
+*.sqlite3
+*.sqlite3-journal
+
+# Données du projet
+# Le contenu du dossier /data est ignoré, sauf le fichier .gitkeep.
+/data/*
+!/data/.gitkeep
+
+# Environnement virtuel Python
+.venv/
+venv/
+env/
+
+# Fichiers Python compilés et caches
+__pycache__/
+*.py[cod]
+
+# Fichiers générés par le système d'exploitation (macOS, Windows)
+.DS_Store
+Thumbs.db
+
+# Fichiers de configuration de l'éditeur (VSCode, JetBrains)
+# Note: Ceux-ci sont aussi couverts par la règle .*/ ci-dessus,
+# mais sont gardés pour une meilleure lisibilité.
+.vscode/
+.idea/
+
+# Rapports de tests
+htmlcov/
+.coverage
