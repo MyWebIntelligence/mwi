@@ -2,125 +2,179 @@
 
 Version anglaise : [README.md](README.md)
 
+MyWebIntelligence (MyWI) est un outil Python destiné aux équipes en humanités numériques qui doivent constituer et analyser rapidement des corpus web. Le projet regroupe les URLs, contenus, médias, métriques et annotations dans une base SQLite, organisée par « lands » (projets thématiques). La CLI orchestre les collectes, traitements et exports pour transformer des listes d’URLs en jeux de données exploitables.
+
+Toutes les données sont stockées dans SQLite (mode WAL), ce qui facilite l’inspection avec des outils comme [DB Browser for SQLite](https://sqlitebrowser.org/) ou l’intégration dans des tableaux de bord.
+
 ## Sommaire
-- [Vue d’ensemble](#vue-densemble)
-- [Fonctionnalités clés](#fonctionnalités-clés)
-- [Architecture](#architecture)
-  - [Flux de commande](#flux-de-commande)
-  - [Modèle de données](#modèle-de-données)
-  - [Pipelines & services](#pipelines--services)
-  - [Paramètres & configuration](#paramètres--configuration)
-- [Mise en route](#mise-en-route)
-  - [Docker Compose](#docker-compose)
-  - [Docker CLI](#docker-cli)
-  - [Développement local](#développement-local)
-- [Guide CLI](#guide-cli)
-  - [Lands & vocabulaire](#lands--vocabulaire)
-  - [Collecte de données](#collecte-de-données)
-  - [Contenu lisible](#contenu-lisible)
-  - [Médias & domaines](#médias--domaines)
-  - [Exports & tags](#exports--tags)
-- [Enrichissement & IA](#enrichissement--ia)
-  - [SEO Rank](#seo-rank)
-  - [Embeddings & similarité](#embeddings--similarité)
-  - [Validation LLM en masse](#validation-llm-en-masse)
-- [Tests & qualité](#tests--qualité)
-- [Dépannage](#dépannage)
+- [Fonctionnalités](#fonctionnalités)
+- [Architecture & internes](#architecture--internes)
+- [Utiliser Docker Compose (recommandé)](#utiliser-docker-compose-recommandé)
+- [Utiliser Docker (manuel)](#utiliser-docker-manuel)
+- [Installation locale](#installation-locale)
+- [Notes générales](#notes-générales)
+- [Gestion des lands](#gestion-des-lands)
+- [Collecte de données](#collecte-de-données)
+- [Export de données](#export-de-données)
+- [Mettre à jour les domaines depuis les heuristiques](#mettre-à-jour-les-domaines-depuis-les-heuristiques)
+- [Pipeline de consolidation des lands](#pipeline-de-consolidation-des-lands)
+- [Tests](#tests)
+- [Embeddings & pseudolinks (guide utilisateur)](#embeddings--pseudolinks-guide-utilisateur)
+  - [Objectif](#objectif)
+  - [Pré-requis & installation](#pré-requis--installation)
+  - [Modèles](#modèles)
+  - [Paramètres (référence)](#paramètres-référence)
+  - [Commandes & paramètres](#commandes--paramètres)
+  - [Dépannage & précautions](#dépannage--précautions)
+  - [Bonnes pratiques — performance](#bonnes-pratiques--performance)
+  - [Choix des modèles et recours](#choix-des-modèles-et-recours)
+  - [Progression & logs](#progression--logs)
+  - [Méthodes de similarité](#méthodes-de-similarité)
+  - [Choisir le backend ANN (FAISS)](#choisir-le-backend-ann-faiss)
+  - [Similarité scalable (lands volumineux)](#similarité-scalable-lands-volumineux)
+  - [Relations NLI (ANN + cross-encoder)](#relations-nli-ann--cross-encoder)
+- [Dépannage & réparation](#dépannage--réparation)
+  - [Récupération SQLite](#récupération-sqlite)
 - [Licence](#licence)
 
-## Vue d’ensemble
+## Fonctionnalités
 
-MyWebIntelligence (MyWI) est un outil Python pensé pour les équipes en humanités numériques qui doivent collecter, organiser et analyser de grands volumes de contenus web. Les projets sont regroupés en « lands » qui stockent vocabulaire, URLs, pages crawlées, médias, liens sémantiques et tags qualitatifs dans une base SQLite. Le CLI orchestre crawl, pipelines d’enrichissement et exports pour passer rapidement d’URLs de départ à des jeux de données exploitables.
-
-Toutes les données résident dans SQLite (mode WAL), ce qui facilite l’inspection via des outils comme [DB Browser for SQLite](https://sqlitebrowser.org/) ou l’intégration dans des tableaux de bord.
-
-## Fonctionnalités clés
-
-- Espace de travail centré sur les lands : vocabulaire, URLs, médias et exports isolés par sujet.
-- Crawl robuste avec parallélisme poli, filtrage par statut HTTP, profondeur, retries et archivage HTML optionnel.
+- Gestion des lands : créez des espaces de travail thématiques avec vocabulaire, URLs, exports et métriques isolés.
+- Crawl résilient : parallélisme poli, filtrage par statut HTTP, profondeur contrôlée, retries et archivage HTML optionnel.
 - Extraction lisible de haute qualité via le pipeline Mercury (stratégies de fusion, enrichissement des métadonnées, reconstruction des liens et recalcul de la pertinence).
-- Pipeline d’analyse médias pour images, vidéos et audio (métadonnées, hachages, détection de doublons, couleurs dominantes, score NSFW).
-- Intelligence domaine : crawls dédiés, mises à jour heuristiques et contrôleurs fins.
-- Surface d’export riche : CSV, GEXF (pages ou nœuds), listings médias, matrices de tags et corpus brut.
-- Embeddings sémantiques par paragraphe avec similarité cosine LSH ou NLI et export CSV des pseudolinks.
-- Enrichissement SERP & SEO via SerpAPI (seed URLs) et SEO Rank (métriques rafraîchissables).
-- Modération LLM de la pertinence (filtre OpenRouter et validation de masse) sans casser les workflows existants.
-- Modèle de configuration extensible : timeouts, heuristiques, providers et secrets gérés dans `settings.py` ou par variables d’environnement.
+- Analyse médias pour images, vidéos et audio (métadonnées, hachages, détection de doublons, couleurs dominantes, score NSFW, erreurs d’analyse traçables).
+- Détection renforcée des fichiers médias (extensions en majuscules/minuscules, contenus dynamiques via Playwright en option).
+- Analyse des domaines avec crawl dédié, heuristiques et contrôleurs spécialisés.
+- Exports riches : CSV, GEXF (pages ou nœuds), listing médias, matrices de tags, corpus brut zippé, pseudolinks.
+- Embeddings par paragraphe avec similarité cosine (exacte ou LSH) et pipeline NLI pour qualifier les relations logiques.
+- Enrichissement SEO : génération de listes d’URLs via SerpAPI, métriques SEO Rank stockées en JSON par expression.
+- Validation LLM : filtre OpenRouter en ligne (oui/non) et validation de masse, désactivable pour retrouver le comportement historique.
+- Paramétrage centralisé dans `settings.py`, surchargé si besoin par des variables d’environnement (timeouts, providers, clés API, heuristiques).
 
-## Architecture
+---
 
-### Flux de commande
+## Architecture & internes
+
+### Structure des fichiers et flux
 
 ```
-mywi.py → mwi/cli.py → mwi/controller.py → mwi/core.py / mwi/export.py
-                                 ↘ mwi/model.py (Peewee ORM)
-                                 ↘ mwi/readable_pipeline.py
-                                 ↘ mwi/media_analyzer.py
-                                 ↘ mwi/embedding_pipeline.py
+mywi.py  →  mwi/cli.py  →  mwi/controller.py  →  mwi/core.py & mwi/export.py
+                                     ↘ mwi/model.py (Peewee ORM)
+                                     ↘ mwi/readable_pipeline.py
+                                     ↘ mwi/media_analyzer.py
+                                     ↘ mwi/embedding_pipeline.py
 ```
 
-- `mywi.py` : point d’entrée CLI, charge la configuration et délègue au parseur.
-- `mwi/cli.py` : construit l’interface `argparse`, convertit les appels en commandes et expose `command_run()` pour les tests.
-- `mwi/controller.py` : fine façade qui mappe les verbes vers la logique `core/export/model` et renvoie `1` en succès (`0` sinon).
-- `mwi/core.py` : cœur métier (crawl, parsing, heuristiques, consolidation, raccordement médias).
-- `mwi/export.py` : centre des exports CSV, GEXF, médias, tags et corpus.
+- `mywi.py` : point d’entrée CLI.
+- `mwi/cli.py` : construit la CLI (`argparse`), expose `command_run()` pour les tests.
+- `mwi/controller.py` : façade qui route chaque verbe vers `core.py`, `export.py` ou `model.py` et renvoie `1` (succès) ou `0` (échec).
+- `mwi/core.py` : cœur métier (crawl, parsing, pipeline Mercury, heuristiques, consolidation, gestion médias).
+- `mwi/export.py` : centralise les exports CSV/GEXF/corpus.
+- `mwi/model.py` : schéma Peewee (SQLite), indexes, relations.
 
-### Modèle de données
+### Modèle de données (SQLite via Peewee)
 
-MyWI repose sur SQLite via Peewee. Entités principales :
+- **Land** : métadonnées du projet (nom, langue, description, timestamps).
+- **Word** / **LandDictionary** : vocabulaire normalisé et liaison many-to-many avec les lands.
+- **Domain** : informations agrégées par domaine (titre, meta description, statut HTTP, dernier crawl).
+- **Expression** : page individuelle (URL, profondeur, contenu lisible, score, SEO Rank JSON, verdict LLM, timestamps).
+- **ExpressionLink** : liens hypertextes orientés entre expressions.
+- **Media** : médias découverts dans les expressions (type, dimensions, format, hash perceptuel, NSFW, erreurs).
+- **Paragraph**, **ParagraphEmbedding**, **ParagraphSimilarity** : texte segmenté par paragraphe, vecteurs, liens sémantiques.
+- **Tag** / **TaggedContent** : taxonomie qualitative et extraits associés.
 
-- `Land` : métadonnées du workspace (nom, langue, description, timestamps).
-- `Word` et `LandDictionary` : vocabulaire canonique et liaison many-to-many avec les lands.
-- `Domain` : informations par domaine (crawl, métas, http_status).
-- `Expression` : URL/page avec profondeur de crawl, contenu lisible, scores, payload SEO, verdict LLM et horodatages.
-- `ExpressionLink` : graphe dirigé des hyperliens entre expressions.
-- `Media` : ressources images/vidéos/audio détectées, avec métadonnées, hachages et statut d’analyse.
-- `Paragraph`, `ParagraphEmbedding`, `ParagraphSimilarity` : texte par paragraphe, vecteurs et liaisons sémantiques (pseudolinks).
-- `Tag` et `TaggedContent` : annotations qualitatives hiérarchiques et extraits associés.
+### Workflows principaux
 
-### Pipelines & services
+- **Initialisation** : `python mywi.py db setup`
+- **Cycle d’un land** : créer le land → ajouter des termes/URLs → `land crawl` → `land readable` → exports → nettoyage éventuel.
+- **Analyse médias** : `python mywi.py land medianalyse --name=LAND [--depth D] [--minrel R]`
+- **Enrichissement SEO Rank** : `python mywi.py land seorank --name=LAND [--limit N] [--depth D] [--force]`
+- **Gestion des domaines** : `python mywi.py domain crawl`
+- **Tags** : `python mywi.py tag export`
+- **Mises à jour heuristiques** : `python mywi.py heuristic update`
+- **Embeddings & similarité** :
+  - Génération : `python mywi.py embedding generate --name=LAND [--limit N]`
+  - Similarité : `python mywi.py embedding similarity --name=LAND --method=cosine|cosine_lsh|nli`
 
-- **Pipeline lisible (`mwi/readable_pipeline.py`)** — intègre Mercury Parser avec stratégies (`smart_merge`, `mercury_priority`, `preserve_existing`), reconstruit liens/médias et rafraîchit la pertinence.
-- **Analyseur médias (`mwi/media_analyzer.py`)** — traitement asynchrone des médias avec Playwright optionnel pour contenu dynamique ; gestion suppression, statistiques et doublons.
-- **Pipeline embeddings (`mwi/embedding_pipeline.py`)** — embeddings de paragraphe via OpenAI, Mistral, Gemini, Hugging Face, provider HTTP ou Ollama, stockage des vecteurs et relations.
-- **Heuristiques & enrichissements** — consolidation, mises à jour heuristiques, SEO Rank et autres contrôleurs spécialisés côtoient le cœur applicatif.
+### Notes d’implémentation
 
-### Paramètres & configuration
+- **Pertinence** : score basé sur les occurrences pondérées de lemmes dans le titre et le contenu.
+- **Crawl** : exécutions asynchrones polies (contrôle du parallélisme, timeouts, retries).
+- **Extraction médias** : liaisons automatiques, stockage sélectif (configurable), détection des doublons.
+- **Exports** : requêtes Peewee/SQL dynamiques, génération CSV et GEXF avec attributs enrichis.
 
-La configuration runtime est centralisée dans `settings.py` et peut être surchargée via l’environnement.
+### Paramètres clés (`settings.py`)
 
-- **Chemins** — `data_location` (base de données, exports, archives) ; défaut `./data` en local ou `/app/data` en Docker.
-- **Réseau** — `user_agent`, `parallel_connections`, `default_timeout`, retries/backoff, archivage HTML optionnel.
-- **Pipelines** — valeurs par défaut pour fusion lisible, parallélisme analyse médias, seuils heuristiques et comportement des exports.
-- **Clés API**
-  - SerpAPI (`settings.serpapi_api_key` / `MWI_SERPAPI_API_KEY`)
-  - SEO Rank (`settings.seorank_api_key` / `MWI_SEORANK_API_KEY`)
-  - OpenRouter (`settings.openrouter_*` / `MWI_OPENROUTER_*`)
-  - Providers d’embeddings (`embed_openai_api_key`, `embed_mistral_api_key`, `embed_gemini_api_key`, `embed_hf_api_key`, etc.)
-- **Transport embeddings** — `embed_provider`, `embed_api_url`, `embed_model_name`, taille de lot, bornes de caractères, seuils de similarité.
+- `data_location`, `user_agent`, `parallel_connections`, `default_timeout`, `archive`, `heuristics`.
 
-## Mise en route
+#### Embeddings — configuration
+- `embed_provider` : `fake`, `http`, `openai`, `mistral`, `gemini`, `huggingface`, `ollama`.
+- `embed_api_url` : endpoint pour les providers HTTP génériques (`POST {"model": name, "input": [texts...]}`).
+- `embed_model_name` : libellé conservé avec les vecteurs.
+- `embed_batch_size` : taille de lot envoyée au provider.
+- `embed_min_paragraph_chars` / `embed_max_paragraph_chars` : longueur minimale/maximale d’un paragraphe.
+- `embed_similarity_method` / `embed_similarity_threshold` : méthode et seuil pour la similarité.
 
-Le chemin le plus simple passe par Docker Compose, mais le CLI fonctionne aussi via Docker natif ou un environnement virtuel local. Avant de lancer les pipelines, initialisez la base et pointez `settings.py:data_location` vers un dossier accessible en écriture.
+Providers spécifiques :
+- **OpenAI / Mistral** : payload `{ "model": name, "input": [texts...] }` → réponse `{ "data": [{"embedding": [...]}, ...] }`.
+- **Gemini** : endpoint `:batchEmbedContents` → `{ "embeddings": [{"values": [...]}, ...] }`.
+- **Hugging Face** : `{ "inputs": [texts...] }` → liste de vecteurs.
+- **Ollama** : appels séquentiels sur `/api/embeddings` (`{"model": name, "prompt": text}`), pas de batch.
 
-### Docker Compose
+#### Option : Filtre LLM (OpenRouter oui/non)
 
-Pré-requis : Docker Desktop (ou Docker Engine) avec Compose.
+- Variables : `MWI_OPENROUTER_ENABLED`, `MWI_OPENROUTER_API_KEY`, `MWI_OPENROUTER_MODEL`, `MWI_OPENROUTER_TIMEOUT`, `MWI_OPENROUTER_READABLE_MAX_CHARS`, `MWI_OPENROUTER_MAX_CALLS_PER_RUN`.
+- Lorsqu’il est désactivé ou non configuré, le pipeline revient au comportement traditionnel.
 
-1. Copier le fichier d’exemple et choisir un répertoire de stockage.
+#### Validation LLM en masse (oui/non)
+
+Commande :
+```bash
+python mywi.py land llm validate --name=LAND [--limit N] [--force]
+```
+
+Pré-requis :
+- `settings.py` : `openrouter_enabled=True`, clé API et modèle renseignés.
+- Base ancienne ? Lancer `python mywi.py db migrate` pour ajouter les colonnes `validllm` / `validmodel`.
+
+Comportement :
+- Récupère les expressions sans verdict et demande au LLM "oui/non".
+- Renseigne `expression.validllm` (`"oui"|"non"`) et `expression.validmodel` (slug du modèle).
+- Filtre sur les expressions avec contenu lisible non nul et longueur ≥ `openrouter_readable_min_chars`.
+- Respecte `openrouter_readable_max_chars` et `openrouter_max_calls_per_run`.
+- Si verdict `"non"`, force `relevance = 0`.
+- `--force` : inclut aussi les entrées marquées `"non"` pour revalidation.
+
+#### Enrichissement SEO Rank
+
+- `python mywi.py land seorank --name=LAND [--limit N] [--depth D] [--force]`
+- Clé à fournir dans `settings.seorank_api_key` (ou `MWI_SEORANK_API_KEY`).
+- Paramètres : `seorank_api_base_url`, `seorank_timeout`, `seorank_request_delay`.
+- Par défaut, seules les expressions `http_status = 200` et `relevance ≥ 1` sont traitées. Utilisez `--http=all` ou `--minrel=0` pour élargir.
+
+#### Bootstrap SerpAPI (`land urlist`)
+
+- `python mywi.py land urlist --name=LAND --query="..." [--datestart AAAA-MM-JJ --dateend AAAA-MM-JJ --timestep week]`
+- Config : `serpapi_api_key`, `serpapi_base_url`, `serpapi_timeout`, `--sleep` (secondes entre pages).
+
+---
+
+## Utiliser Docker Compose (recommandé)
+
+1. Copier le fichier d’environnement et choisir le dossier de stockage :
    ```bash
    cp .env.example .env
    ```
-   Conserver `HOST_DATA_DIR=./data` (défaut) ou définir un chemin absolu (ex. `/Users/vous/mywi_data`).
-2. Construire et démarrer les services.
+   Laisser `HOST_DATA_DIR=./data` ou définir un chemin absolu (ex. `/Users/vous/mywi_data`).
+2. Construire et lancer les services :
    ```bash
    docker compose up -d --build
    ```
-3. Initialiser la base (premier lancement).
+3. Initialiser la base la première fois :
    ```bash
    docker compose exec mwi python mywi.py db setup
    ```
-4. Utiliser le CLI depuis le conteneur.
+4. Exécuter la CLI depuis le conteneur :
    ```bash
    docker compose exec mwi python mywi.py land create --name="MonSujet" --desc="..." --lang=fr
    docker compose exec mwi python mywi.py land addurl --land="MonSujet" --urls="https://example.org"
@@ -129,21 +183,21 @@ Pré-requis : Docker Desktop (ou Docker Engine) avec Compose.
    docker compose exec mwi python mywi.py land export --name="MonSujet" --type=pagecsv
    ```
 
-Emplacements des données :
-- Hôte : `${HOST_DATA_DIR}` (défaut `./data` dans le dépôt)
-- Conteneur : `/app/data` (déjà utilisé par `settings.py`)
+Emplacements :
+- Hôte : `${HOST_DATA_DIR}` (défaut : `./data`).
+- Conteneur : `/app/data` (déjà référencé par `settings.py`).
 
 Extras optionnels :
-- Installer les navigateurs Playwright (médias dynamiques) :
+- Installer Playwright pour l’extraction dynamique :
   ```bash
   docker compose exec mwi python install_playwright.py
   ```
-- Construire avec les extras ML (FAISS, transformers) :
+- Construire avec les dépendances ML (FAISS + transformers) :
   ```bash
   MYWI_WITH_ML=1 docker compose build
   ```
 
-Arrêter ou supprimer la stack :
+Arrêt / nettoyage :
 ```bash
 docker compose down        # arrêter
 ```
@@ -151,221 +205,395 @@ docker compose down        # arrêter
 docker compose down -v     # arrêter et supprimer les volumes (destructif)
 ```
 
-### Docker CLI
+---
 
-1. Préparer un dossier hôte pour les données persistantes.
-   ```bash
-   mkdir -p ~/mywi_data
-   ```
-2. Builder l’image.
+## Utiliser Docker (manuel)
+
+1. Préparer un dossier pour les données persistantes (ex. `~/mywi_data`).
+2. Cloner le dépôt et se placer à la racine.
+3. Construire l’image :
    ```bash
    docker build -t mwi:latest .
    ```
-3. Lancer le conteneur en montant le dossier vers `/app/data` (chemin par défaut de `data_location`).
+4. Démarrer le conteneur en montant le dossier hôte vers `/app/data` :
    ```bash
    docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest
    ```
-4. Ouvrir un shell et initialiser la base.
+5. Ouvrir un shell dans le conteneur et initialiser la base :
    ```bash
    docker exec -it mwi bash
    python mywi.py db setup
    ```
-5. Utiliser ensuite le CLI (`python mywi.py ...`). Exporter `MYWI_DATA_DIR` si vous montez un autre chemin.
+6. Exécuter ensuite les commandes `python mywi.py ...`. Pour utiliser un autre chemin interne, exporter `MYWI_DATA_DIR` avant de lancer le conteneur.
 
-### Développement local
+L’image inclut Playwright + Chromium pour l’analyse média dynamique (JS, lazy-loading).
 
-1. Cloner le dépôt et créer un environnement virtuel.
+---
+
+## Installation locale
+
+1. Cloner le dépôt et créer un environnement virtuel :
    ```bash
    git clone https://github.com/MyWebIntelligence/MyWebIntelligencePython.git
    cd MyWebIntelligencePython
    python -m venv venv
    source venv/bin/activate  # Windows : .\venv\Scripts\activate
    ```
-2. Installer les dépendances.
+2. Installer les dépendances :
    ```bash
    pip install -r requirements.txt
    ```
-3. Configurer `data_location` dans `settings.py` vers un chemin absolu accessible (ex. `/Users/vous/mywi_data`).
-4. Initialiser la base.
+3. Configurer `settings.py:data_location` vers un chemin absolu accessible.
+4. Initialiser la base :
    ```bash
    python mywi.py db setup
    ```
-5. (Optionnel) Installer les navigateurs Playwright pour l’analyse média dynamique.
+5. (Optionnel) Installer Playwright pour l’analyse média dynamique :
    ```bash
    python install_playwright.py
    ```
 
-## Guide CLI
+---
 
-MyWI expose des verbes sous la forme `python mywi.py <objet> <action>`. Tous les contrôleurs renvoient `1` en cas de succès (`0` sinon) pour faciliter l’automatisation.
+## Notes générales
 
-### Lands & vocabulaire
+- Les commandes se lancent avec `python mywi.py ...` (ou, via Docker, `docker compose exec mwi python mywi.py ...`).
+- Remplacez les valeurs d’exemple (`LAND`, `TERMS`, `https://…`) par vos données.
+- Vérifiez que `settings.py:data_location` pointe vers un dossier existant et accessible en écriture.
 
-- Créer un land :
-  ```bash
-  python mywi.py land create --name="MonSujet" --desc="..." --lang=fr
-  ```
-- Gérer le vocabulaire :
-  ```bash
-  python mywi.py land addterm --land="MonSujet" --terms="activisme, climat"
-  python mywi.py land delterm --land="MonSujet" --terms="climat"
-  ```
-- Ajouter des URLs :
-  ```bash
-  python mywi.py land addurl --land="MonSujet" --urls="https://example.org,https://example.net"
-  python mywi.py land addurl --land="MonSujet" --path=urls.txt
-  ```
-- Supprimer des données :
-  ```bash
-  python mywi.py land delete --name="MonSujet"
-  python mywi.py land delete --name="MonSujet" --maxrel=0
-  ```
+---
 
-### Collecte de données
+## Gestion des lands
 
-- Crawler les URLs déjà stockées :
-  ```bash
-  python mywi.py land crawl --name="MonSujet" --limit=50 --depth=1
-  python mywi.py land crawl --name="MonSujet" --http=503
-  ```
-  Options clés : `--limit`, `--depth`, `--http`, `--since`, `--async`.
-
-- Amorcer depuis Google (SerpAPI) :
-  ```bash
-  python mywi.py land urlist --name="MonSujet" --query="(gilets jaunes) OR (manifestation)" \
-    --datestart=2023-01-01 --dateend=2023-03-31 --timestep=week --lang=fr
-  ```
-  Nécessite `settings.serpapi_api_key` ou `MWI_SERPAPI_API_KEY`. Supporte `--sleep` pour la limitation de débit.
-
-- Consolider / recalculer les heuristiques :
-  ```bash
-  python mywi.py land consolidate --name="MonSujet" --limit=100 --depth=2
-  ```
-
-### Contenu lisible
-
-Utiliser le pipeline Mercury pour extraire un contenu propre, reconstruire les médias et recalculer la pertinence.
-
+### 1. Créer un nouveau land
 ```bash
-python mywi.py land readable --name="MonSujet" --limit=100 --merge=smart_merge
+python mywi.py land create --name="MonSujet" --desc="Description" --lang=fr
 ```
 
-Options importantes :
-- `--merge` : `smart_merge` (défaut), `mercury_priority`, `preserve_existing`
-- `--depth` : restreindre à une profondeur
-- `--force` : retraiter même si `readable_at` est déjà défini
+### 2. Lister les lands
+```bash
+python mywi.py land list
+python mywi.py land list --name="MonSujet"  # détail d’un land donné
+```
 
-Pré-requis : installer `@postlight/mercury-parser` (`npm install -g @postlight/mercury-parser`).
+### 3. Ajouter des termes
+```bash
+python mywi.py land addterm --land="MonSujet" --terms="mot1, mot2"
+```
 
-### Médias & domaines
+### 4. Ajouter des URLs
+```bash
+python mywi.py land addurl --land="MonSujet" --urls="https://example.org,https://example.net"
+python mywi.py land addurl --land="MonSujet" --path=urls.txt
+```
 
-- Analyser les médias :
+### 5. Récupérer des URLs via SerpAPI
+```bash
+python mywi.py land urlist --name="MonSujet" --query="(mot clé)" \
+  --datestart=2023-01-01 --dateend=2023-03-31 --timestep=week --lang=fr
+```
+- Nécessite `settings.serpapi_api_key` ou `MWI_SERPAPI_API_KEY`.
+- `--sleep` contrôle la pause entre pages (défaut : 1 s).
+
+### 6. Supprimer des données
+- Supprimer un land entier :
   ```bash
-  python mywi.py land medianalyse --name="MonSujet" --depth=2 --minrel=1
-  python mywi.py land reanalyze --name="MonSujet" --limit=20
-  python mywi.py land preview_deletion --name="MonSujet"
-  python mywi.py land media_stats --name="MonSujet"
+  python mywi.py land delete --name="MonSujet"
   ```
-- Crawler les domaines indépendamment :
+- Supprimer les expressions sous un seuil de pertinence :
   ```bash
-  python mywi.py domain crawl --limit=200 --http=404
-  ```
-
-L’analyse média tire parti de `python install_playwright.py` pour installer les navigateurs nécessaires à l’extraction dynamique.
-
-### Exports & tags
-
-- Générer des exports CSV, GEXF ou corpus :
-  ```bash
-  python mywi.py land export --name="MonSujet" --type=pagecsv
-  python mywi.py land export --name="MonSujet" --type=nodegexf
-  python mywi.py land export --name="MonSujet" --type=mediacsv
-  python mywi.py land export --name="MonSujet" --type=corpus
-  ```
-  Types disponibles : `pagecsv`, `pagegexf`, `nodecsv`, `nodegexf`, `mediacsv`, `corpus`, `pseudolinks`.
-
-- Travailler avec les tags qualitatifs :
-  ```bash
-  python mywi.py tag create --land="MonSujet" --name="thème/protestation"
-  python mywi.py tag export --land="MonSujet" --type=matrix
-  python mywi.py tag delete --land="MonSujet" --name="thème/protestation"
+  python mywi.py land delete --name="MonSujet" --maxrel=0.5
   ```
 
-Les exports sont écrits sous `data/export_*` à l’intérieur du `data_location` configuré.
+---
 
-## Enrichissement & IA
+## Collecte de données
 
-### SEO Rank
+### 1. Crawler les URLs du land
+```bash
+python mywi.py land crawl --name="MonSujet" [--limit N] [--http CODE] [--depth D]
+```
+- `--limit` : nombre maximal d’URLs à crawler.
+- `--http` : relance uniquement les pages ayant renvoyé ce code (ex. `--http 503`).
+- `--depth` : limite la profondeur de crawl.
 
-Enrichir les expressions avec des métriques SEO Rank.
+### 2. Extraire un contenu lisible (pipeline Mercury)
 
+Pré-requis : `npm install -g @postlight/mercury-parser`
+```bash
+python mywi.py land readable --name="MonSujet" [--limit N] [--depth D] [--merge stratégie]
+```
+Stratégies de fusion :
+- `smart_merge` (défaut) : privilégie Mercury pour le contenu, conserve les métadonnées les plus riches.
+- `mercury_priority` : Mercury écrase toujours les données existantes.
+- `preserve_existing` : complète uniquement les champs vides.
+
+### 3. Capturer les métriques SEO Rank
 ```bash
 python mywi.py land seorank --name="MonSujet" --limit=100 --depth=1 --force
 ```
-
-Configuration requise :
-- Renseigner une clé API dans `settings.seorank_api_key` ou `MWI_SEORANK_API_KEY`.
+- Clé à renseigner dans `settings.seorank_api_key` ou `MWI_SEORANK_API_KEY`.
 - Options : `--http`, `--minrel`, `--request-delay`.
+- Par défaut, seules les expressions `http_status=200` et `relevance ≥ 1` sont enrichies.
 
-Par défaut, seules les expressions avec `http_status=200` et `relevance ≥ 1` sont ciblées. Utiliser `--force` pour rafraîchir les entrées possédant déjà un payload.
+---
 
-### Embeddings & similarité
-
-Générer des embeddings par paragraphe et calculer les relations sémantiques.
-
-```bash
-python mywi.py embedding generate --name="MonSujet" --limit=500
-python mywi.py embedding similarity --name="MonSujet" --method=cosine_lsh \
-  --threshold=0.85 --lshbits=20 --topk=15 --minrel=1
-python mywi.py embedding similarity --name="MonSujet" --method=nli --backend=bruteforce
-```
-
-Mise en place :
-- Choisir un provider dans `settings.py` (`embed_provider`, `embed_model_name`, `embed_batch_size`).
-- Installer les extras optionnels (`pip install -r requirements-ml.txt`, FAISS, transformers) pour NLI ou grandes exécutions.
-- Exporter les pseudolinks :
-  ```bash
-  python mywi.py land export --name="MonSujet" --type=pseudolinks
-  ```
-
-### Validation LLM en masse
-
-Demander à un LLM (OpenRouter) de valider la pertinence des pages par lot.
+## Export de données
 
 ```bash
-python mywi.py land llm validate --name="MonSujet" --limit=200 --force
+python mywi.py land export --name="MonSujet" --type=pagecsv
+python mywi.py land export --name="MonSujet" --type=nodegexf
+python mywi.py land export --name="MonSujet" --type=mediacsv
+python mywi.py land export --name="MonSujet" --type=corpus
 ```
+Types disponibles : `pagecsv`, `pagegexf`, `nodecsv`, `nodegexf`, `mediacsv`, `corpus`, `pseudolinks`, `pseudolinkspage`, `pseudolinksdomain`.
 
-Configuration :
-- Activer la fonctionnalité dans `settings.py` (`openrouter_enabled=True`) ou via `MWI_OPENROUTER_ENABLED=true`.
-- Fournir `openrouter_api_key`, `openrouter_model` et ajuster les paramètres (`openrouter_readable_min_chars`, `openrouter_readable_max_chars`, `openrouter_max_calls_per_run`).
-- Exécuter `python mywi.py db migrate` si la base ne dispose pas encore des colonnes `validllm` / `validmodel`.
+Les exports sont déposés dans `data/export_*` sous le `data_location` configuré.
 
-Le contrôleur enregistre `expression.validllm` (`"oui" / "non"`) et `expression.validmodel`. Un verdict `"non"` force `relevance=0`.
+---
 
-## Tests & qualité
+## Mettre à jour les domaines depuis les heuristiques
 
-- Lancer l’ensemble des tests :
+```bash
+python mywi.py heuristic update
+```
+Met à jour les domaines en appliquant les heuristiques configurées (pertinence, filtres, métadonnées). Utile après modification de `settings.heuristics`.
+
+---
+
+## Pipeline de consolidation des lands
+
+```bash
+python mywi.py land consolidate --name="MonSujet" [--limit N] [--depth D]
+```
+- Reconstruit les liens médias/expressions manquants, recalcul les scores de pertinence, complète les métadonnées.
+- Ne traite que les expressions déjà crawlées (`fetched_at` non nul).
+
+---
+
+## Tests
+
+- Exécuter l’ensemble :
   ```bash
   pytest tests/
   ```
-- Focaliser sur le smoke test CLI :
+- Fichier spécifique :
+  ```bash
+  pytest tests/test_cli.py
+  ```
+- Test ciblé :
   ```bash
   pytest tests/test_cli.py::test_functional_test
   ```
-- Toute nouvelle logique mérite un test ciblé en suivant les patterns du dossier `tests/`.
 
-En validation manuelle : créer un land, ajouter quelques URLs, exécuter `land crawl`, `land readable`, puis exporter `pagecsv`. Pour les changements liés aux médias, lancer `land medianalyse` sur une petite profondeur.
+---
 
-## Dépannage
+# Embeddings & pseudolinks (guide utilisateur)
 
-- **Base absente ou corrompue** — lancer `python mywi.py db setup` (destructif) et vérifier `settings.data_location`.
-- **Pas de contenu lisible** — vérifier l’installation de Mercury, tenter `land readable --merge=mercury_priority` ou `land consolidate`.
-- **Exports vides** — contrôler `--minrel`, les filtres de profondeur et l’état `fetched_at/readable_at`.
-- **Médias non détectés** — installer Playwright (`python install_playwright.py`) et vérifier les filtres d’extensions dans `settings.py`.
-- **Timeouts HTTP** — ajuster `parallel_connections`, `default_timeout` ou relancer avec `land crawl --http=...`.
-- **Erreurs API** — vérifier les clés SerpAPI / SEO Rank dans l’environnement ou `settings.py`.
+## Objectif
+- Générer des vecteurs par paragraphe puis relier les paragraphes proches (pseudolinks).
+- Facultatif : qualifier chaque paire avec un modèle NLI (entailment / neutral / contradiction).
+- Exporter les relations au niveau paragraphe, page et domaine.
 
-## Licence
+Flux type :
+1. Crawler et extraire le texte lisible.
+2. Générer les embeddings (`embedding generate`).
+3. Calculer les similarités (`embedding similarity`).
+4. Exporter les résultats (`land export --type=pseudolinks|pseudolinkspage|pseudolinksdomain`).
 
-MyWI est distribué sous licence MIT. Voir le fichier [LICENSE](LICENSE) pour les détails.
+## Pré-requis & installation
+- Base initialisée et pages avec contenu lisible.
+- Créer un environnement virtuel Python « propre » :
+  ```bash
+  python3 -m venv .venv
+  source .venv/bin/activate
+  python -m pip install -U pip setuptools wheel
+  python -m pip install -r requirements.txt
+  ```
+- Optionnel (NLI + FAISS) :
+  ```bash
+  python -m pip install -r requirements-ml.txt
+  ```
+- Vérifier l’environnement :
+  ```bash
+  python mywi.py embedding check
+  ```
+
+## Modèles
+- Modèle NLI multilingue recommandé : `MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`.
+- Fallback léger (anglais) : `typeform/distilbert-base-uncased-mnli`.
+- Configurer `settings.py:nli_model_name` (et `nli_fallback_model_name` si souhaité).
+
+## Paramètres (référence)
+- **Embeddings (bi-encoder)** :
+  - `embed_provider`, `embed_model_name`, `embed_batch_size`, `embed_min_paragraph_chars`, `embed_max_paragraph_chars`.
+  - `embed_similarity_method` (`cosine`, `cosine_lsh`), `embed_similarity_threshold`.
+- **Rappel ANN / NLI** :
+  - `similarity_backend` (`faiss` | `bruteforce`).
+  - `similarity_top_k` (voisins par paragraphe).
+  - `nli_model_name`, `nli_fallback_model_name`.
+  - `nli_backend_preference`, `nli_batch_size`, `nli_max_tokens`, `nli_torch_num_threads`.
+  - `nli_progress_every_pairs`, `nli_show_throughput`.
+- **Variables d’environnement CPU** :
+  - `OMP_NUM_THREADS`, `MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `TOKENIZERS_PARALLELISM=false`.
+
+## Commandes & paramètres
+- Générer les embeddings :
+  ```bash
+  python mywi.py embedding generate --name=LAND [--limit N]
+  ```
+- Calculer les similarités :
+  - Cosine exacte :
+    ```bash
+    python mywi.py embedding similarity --name=LAND --method=cosine \
+      --threshold=0.85 [--minrel R]
+    ```
+  - Cosine LSH (approx) :
+    ```bash
+    python mywi.py embedding similarity --name=LAND --method=cosine_lsh \
+      --lshbits=20 --topk=15 --threshold=0.85 [--minrel R] [--maxpairs M]
+    ```
+  - ANN + NLI :
+    ```bash
+    python mywi.py embedding similarity --name=LAND --method=nli \
+      --backend=faiss|bruteforce --topk=10 [--minrel R] [--maxpairs M]
+    ```
+- Exports CSV :
+  ```bash
+  python mywi.py land export --name=LAND --type=pseudolinks
+  python mywi.py land export --name=LAND --type=pseudolinkspage
+  python mywi.py land export --name=LAND --type=pseudolinksdomain
+  ```
+- Outils :
+  - Vérifier la configuration : `python mywi.py embedding check`
+  - Réinitialiser un land : `python mywi.py embedding reset --name=LAND`
+
+## Dépannage & précautions
+- Scores `score_raw=0.5` et `score=0` → le modèle de secours neutre a été utilisé. Installer les dépendances ML ou choisir un modèle supporté.
+- Colonne absente (`score_raw`) → lancer `python mywi.py db migrate`.
+- Segfault macOS (OpenMP/Torch) → venv pip-only, commencer avec `OMP_NUM_THREADS=1`, ajuster ensuite ; éventuellement `KMP_DUPLICATE_LIB_OK=TRUE`.
+- Scoring lent → diminuer `nli_batch_size`, filtrer avec `--minrel`, limiter avec `--maxpairs`, ajuster les threads.
+- Trop de paires → augmenter `--threshold`, `--lshbits`, réduire `--topk`, appliquer `--minrel`.
+
+## Bonnes pratiques — performance
+- **Petit/moyen corpus (≤ ~50k paragraphes)** : méthode `cosine`, `--threshold=0.85`, `--minrel=1`.
+- **Grand corpus (≥ ~100k)** : privilégier `cosine_lsh`, régler `--lshbits=18–22`, `--topk=10–20`, `--threshold` ≥ 0,85, limiter `--maxpairs`.
+- **Pipeline NLI** :
+  - Utiliser FAISS (`--backend=faiss`) si disponible.
+  - Départ prudent : `--topk=6–10`, `--minrel=1–2`, `--maxpairs=20k–200k`.
+  - Choisir un modèle adapté (DistilBERT MNLI pour des tests rapides, DeBERTa XNLI pour qualité multilingue).
+  - Ajuster `nli_batch_size` (32–96) et `nli_max_tokens` (384–512).
+- **Threads CPU** :
+  - Exporter `OMP_NUM_THREADS=N` et caler `settings.nli_torch_num_threads` sur la même valeur.
+  - Garder `TOKENIZERS_PARALLELISM=false`.
+- **Suivi** : `nli_progress_every_pairs` contrôle la fréquence d’affichage (progression, débit, ETA).
+
+## Choix des modèles et recours
+- Modèle NLI par défaut : DeBERTa multilingue (requiert `sentencepiece`).
+- Alternative sûre (EN) : DistilBERT MNLI.
+- Configurer dans `settings.py:nli_model_name`.
+- En absence de dépendances, le système retombe sur un classifieur neutre (`score=0`).
+
+## Progression & logs
+- Le rappel ANN journalise le nombre de candidats tous les quelques centaines de paragraphes.
+- Le scoring NLI affiche périodiquement `pairs/s`, ETA et cumul.
+- Un résumé final présente le temps total et le volume traité.
+
+## Méthodes de similarité
+- `cosine` : comparaison exacte O(n²), idéale pour volumes modestes.
+- `cosine_lsh` : recherche approximative via hyperplans aléatoires, scalable sans FAISS.
+- `nli` : pipeline en deux étapes (ANN → cross-encoder NLI) produisant `RelationScore` { -1, 0, 1 } et `ConfidenceScore`.
+
+## Choisir le backend ANN (FAISS)
+- Installer FAISS (`pip install faiss-cpu`) pour accélérer le rappel.
+- Forcer un backend : `--backend=faiss` (ou `--backend=bruteforce`).
+- Paramètre global : `similarity_backend = 'faiss'` dans `settings.py`.
+- Sans FAISS, le rappel repasse automatiquement en bruteforce.
+- Vérification : `python mywi.py embedding check`.
+
+## Similarité scalable (lands volumineux)
+
+```bash
+python mywi.py embedding similarity \
+  --name=MonSujet \
+  --method=cosine_lsh \
+  --threshold=0.85 \
+  --lshbits=20 \
+  --topk=15 \
+  --minrel=1 \
+  --maxpairs=5000000
+```
+
+- `--lshbits` : nombre d’hyperplans (plus élevé → buckets plus fins).
+- `--topk` : limite le nombre de voisins conservés par paragraphe.
+- `--threshold` : seuil cosine minimal.
+- `--minrel` : filtre sur la pertinence des expressions.
+- `--maxpairs` : plafond sur le nombre total de paires.
+
+## Relations NLI (ANN + cross-encoder)
+
+- Installer les dépendances si besoin :
+  ```bash
+  pip install sentence-transformers transformers
+  pip install faiss-cpu  # rappel ANN plus rapide (optionnel)
+  ```
+- Exemple :
+  ```bash
+  python mywi.py embedding similarity \
+    --name=MonSujet \
+    --method=nli \
+    --backend=bruteforce \
+    --topk=50 \
+    --minrel=1 \
+    --maxpairs=2000000
+  ```
+- Réglages clés : `nli_model_name`, `nli_batch_size`, `similarity_backend`, `similarity_top_k`.
+- Recettes rapides :
+  - Cosine exact : `--method=cosine --threshold=0.85 --minrel=1`.
+  - Cosine approx : `--method=cosine_lsh --lshbits=20 --topk=15 --threshold=0.85 --minrel=1 --maxpairs=5000000`.
+  - ANN + NLI + FAISS :
+    ```bash
+    pip install sentence-transformers transformers faiss-cpu
+    python mywi.py embedding similarity --name=MonSujet --method=nli \
+      --backend=faiss --topk=50 --minrel=1 --maxpairs=2000000
+    ```
+- Export CSV (pseudolinks) : `land export --type=pseudolinks|pseudolinkspage|pseudolinksdomain`.
+- `python mywi.py embedding check` récapitule la configuration, les librairies détectées et l’état des tables.
+
+---
+
+# Dépannage & réparation
+
+## Récupération SQLite
+
+Si la base SQLite est corrompue (ex. « database disk image is malformed »), utilisez le script dédié :
+```bash
+chmod +x scripts/sqlite_recover.sh
+scripts/sqlite_recover.sh data/mwi.db data/mwi_repaired.db
+```
+
+Étapes :
+- Sauvegarde `data/mwi.db` (+ fichiers `-wal` / `-shm` le cas échéant) dans `data/sqlite_repair_<timestamp>/backup/`.
+- Tente d’abord `.recover`, puis `.dump` en repli.
+- Reconstruit `data/mwi_repaired.db`, exécute `PRAGMA integrity_check;`, journalise les tables dans `.../logs/`.
+
+Valider sans écraser la base d’origine :
+```bash
+mkdir -p data/test-repaired
+cp data/mwi_repaired.db data/test-repaired/mwi.db
+MWI_DATA_LOCATION="$PWD/data/test-repaired" venv/bin/python mywi.py land list
+```
+
+Adopter la base réparée (après sauvegarde manuelle) :
+```bash
+cp data/mwi.db data/mwi.db.bak_$(date +%Y%m%d_%H%M%S)
+mv data/mwi_repaired.db data/mwi.db
+```
+
+Astuce : `MWI_DATA_LOCATION` permet de pointer temporairement vers un autre dossier de données sans modifier `settings.py:data_location`.
+
+---
+
+# Licence
+
+MyWI est distribué sous licence MIT. Consultez le fichier [LICENSE](LICENSE) pour le détail des conditions.
