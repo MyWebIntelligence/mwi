@@ -26,6 +26,7 @@ MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers i
 *   **Land Creation & Management**: Organize your research into "lands," which are thematic collections of terms and URLs.
 *   **Web Crawling**: Crawl URLs associated with your lands to gather web page content.
 *   **Content Extraction**: Process crawled pages to extract readable content.
+*   **SEO Rank Enrichment**: Query the SEO Rank API for each expression and keep the raw JSON payload alongside the URL.
 *   **Embeddings & Pseudolinks**: Paragraph-level embeddings, semantic similarity, and CSV export of "pseudolinks" between semantically close paragraphs across pages.
 *   **Media Analysis & Filtering**: Automatic extraction and analysis of images, videos, and audio. Extracts metadata (dimensions, size, format, dominant colors, EXIF), supports intelligent filtering and deletion, duplicate detection, and batch asynchronous processing.
 *   **Enhanced Media Detection**: Detects media files with both uppercase and lowercase extensions (.JPG, .jpg, .PNG, .png, etc.).
@@ -65,13 +66,14 @@ mywi.py  →  mwi/cli.py  →  mwi/controller.py  →  mwi/core.py & mwi/export.
 - **Paragraph / ParagraphEmbedding / ParagraphSimilarity**: Paragraph store, embeddings, and semantic links (pseudolinks).
 - **Tag**: Hierarchical tags.
 - **TaggedContent**: Snippets tagged in Expressions.
-  - Expression extra fields: `validllm` (yes/no) and `validmodel` (OpenRouter model used)
+  - Expression extra fields: `validllm` (yes/no), `validmodel` (OpenRouter model used), and `seorank` (raw SEO Rank API JSON)
 
 ### Main Workflows
 
 - **Project Bootstrap**: `python mywi.py db setup`
 - **Media Analysis**: `python mywi.py land medianalyse --name=LAND_NAME [--depth=DEPTH] [--minrel=MIN_RELEVANCE]`
 - **Land Life-Cycle**: Create, add terms, add URLs, crawl, extract readable, export, clean/delete.
+- **SEO Rank Enrichment**: `python mywi.py land seorank --name=LAND [--limit N] [--depth D] [--force]`
 - **Domain Processing**: `python mywi.py domain crawl`
 - **Tag Export**: `python mywi.py tag export`
 - **Heuristics Update**: `python mywi.py heuristic update`
@@ -148,6 +150,33 @@ Behavior:
 
 `--force` option:
 - Also includes expressions with an existing `"non"` verdict in the selection (does not include `"oui"`).
+
+#### SEO Rank enrichment
+
+The `land seorank` command enriches each expression with the raw SEO Rank API payload. Configure these keys in `settings.py` (or via environment variables):
+
+- `seorank_api_base_url`: Base endpoint (defaults to `https://seo-rank.my-addr.com/api2/moz+sr+fb`).
+- `seorank_api_key`: Required API key (`MWI_SEORANK_API_KEY` overrides the default).
+- `seorank_timeout`: Request timeout in seconds.
+- `seorank_request_delay`: Pause between calls to stay polite with the provider.
+
+By default the command only targets expressions with `http_status = 200` and `relevance ≥ 1`; pass `--http=all` or `--minrel=0` to broaden the selection.
+
+Without a valid API key the command exits early. Use `--force` to refresh entries that already contain data in `expression.seorank`.
+
+#### SerpAPI bootstrap (`land urlist`)
+
+The `land urlist` command queries Google via SerpAPI and pushes new URLs to a
+land. Configure the following values in `settings.py` or via environment
+variables:
+
+- `serpapi_api_key`: Required API key (`MWI_SERPAPI_API_KEY` overrides the default).
+- `serpapi_base_url`: Base endpoint (defaults to `https://serpapi.com/search`).
+- `serpapi_timeout`: HTTP timeout in seconds.
+
+Date filters (`--datestart`, `--dateend`, `--timestep`) are optional but must be
+provided as valid `YYYY-MM-DD` strings when used. The command sleeps between
+pages (`--sleep`) to avoid rate limits; set it to `0` for tests/mocks only.
 
 ### Testing
 
@@ -522,7 +551,33 @@ Add URLs to a land, either directly or from a file.
 
 ---
 
-#### 5. Delete a Land or Expressions
+#### 5. Gather URLs from SerpAPI (Google)
+
+Bootstrap a land with URLs coming from Google search results via SerpAPI. Only
+new URLs are inserted; existing entries keep their data but receive a title if
+one was returned by the API.
+
+```bash
+python mywi.py land urlist --name="MyResearchTopic" --query="(gilets jaunes) OR (manifestation)" \
+  --datestart=2023-01-01 --dateend=2023-03-31 --timestep=week
+```
+
+| Option      | Type  | Required | Default | Description |
+|-------------|-------|----------|---------|-------------|
+| --name      | str   | Yes      |         | Land receiving the URLs |
+| --query     | str   | Yes      |         | Google search query (any valid Boolean string) |
+| --datestart | str   | No       |         | Start of the date filter (`YYYY-MM-DD`) |
+| --dateend   | str   | No       |         | End of the date filter (`YYYY-MM-DD`) |
+| --timestep  | str   | No       | week    | Window size when iterating between dates (`day`, `week`, `month`) |
+| --sleep     | float | No       | 1.0     | Base delay (seconds) between pages to respect rate limits |
+| --lang      | str   | No       | fr      | Comma-separated language list; first value is used for SerpAPI |
+
+> **API key** — populate `settings.serpapi_api_key` or export
+> `MWI_SERPAPI_API_KEY` before running the command.
+
+---
+
+#### 6. Delete a Land or Expressions
 
 Delete an entire land or only expressions below a relevance threshold.
 
@@ -643,6 +698,64 @@ python mywi.py land readable --name="AsthmaResearch" --limit=100 --depth=1 --mer
 
 **Note:** This pipeline replaces the legacy readable functionality, providing better content quality, robustness, and flexible merge strategies for different use cases.
 
+---
+
+#### 3. Capture SEO Rank Metrics
+
+Fetch SEO Rank metrics for each expression and store the raw JSON payload in the database.
+
+**Prerequisites:**
+
+- Provide `seorank_api_key` in `settings.py` or export `MWI_SEORANK_API_KEY` before running the command.
+- Optionally adjust `seorank_request_delay` to respect the provider's throttling policy (default: one second between calls).
+
+**Command:**
+```bash
+python mywi.py land seorank --name="MyResearchTopic" [--limit=NUMBER] [--depth=NUMBER] [--force]
+```
+
+| Option   | Type    | Required | Default | Description |
+|----------|---------|----------|---------|-------------|
+| --name   | str     | Yes      |         | Land whose expressions will be enriched |
+| --limit  | int     | No       |         | Maximum number of expressions to query in this run |
+| --depth  | int     | No       |         | Restrict to expressions at a specific crawl depth |
+| --http   | str     | No       | 200     | Filter by HTTP status (`all` to disable the filter) |
+| --minrel | int     | No       | 1       | Only process expressions with `relevance` ≥ this value |
+| --force  | boolean | No       | False   | Re-fetch even if `expression.seorank` already contains data |
+
+**Behavior:**
+
+- By default only expressions without SEO Rank data are selected. Use `--force` to refresh existing entries.
+- `--http` defaults to `200`; pass `--http=all` (or `any`) to include every status code.
+- `--minrel` defaults to `1`; set to `0` to include pages with relevance `0`.
+- `--limit` applies after filtering; set it to keep the run short during testing.
+- Each successful call stores the JSON response as-is in the `expression.seorank` column (text field).
+- Errors or non-200 HTTP responses are logged and the command continues with the next URL.
+
+**Example:**
+```bash
+# Enrich the first 100 seed URLs (depth 0) for the "AsthmaResearch" land
+python mywi.py land seorank --name="AsthmaResearch" --depth=0 --limit=100
+
+# Refresh every stored payload, regardless of current values
+python mywi.py land seorank --name="AsthmaResearch" --force
+```
+
+**Tip:** Once data is stored you can inspect it directly via SQLite (`SELECT seorank FROM expression WHERE id=…`) or load it in Python with `json.loads` for downstream analysis.
+
+**Payload fields (SEO Rank API):**
+- `sr_domain` – domain that the metrics refer to.
+- `sr_rank` – provider’s global SEO Rank score (lower values indicate stronger authority).
+- `sr_kwords` – number of tracked keywords the domain currently ranks for.
+- `sr_traffic` – estimated monthly organic visits attributed to the domain.
+- `sr_costs` – estimated ad-equivalent cost (in USD) of the organic traffic.
+- `sr_ulinks` – count of outgoing links found on the analysed URL.
+- `sr_hlinks` – total backlinks pointing to the URL (all HTTP links).
+- `sr_dlinks` – number of unique referring domains that link to the URL.
+- `fb_comments` – Facebook comments recorded for the URL.
+- `fb_shares` – Facebook share events recorded for the URL.
+- `fb_reac` – Facebook reactions (likes, etc.) recorded for the URL.
+
 ### Domain Management
 
 #### 1. Crawl Domains
@@ -674,6 +787,8 @@ Export data from your lands or tags for analysis in other tools.
 #### 1. Export Land Data
 
 Export data from a land in various formats.
+
+`pagecsv` and `pagegexf` include any SEO Rank fields stored in `expression.seorank`; missing or `unknown` values are exported as `na`.
 
 #### 2. Media Analysis
 

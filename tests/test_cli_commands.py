@@ -1,3 +1,4 @@
+import json
 import os
 import io
 import random
@@ -132,6 +133,133 @@ def test_land_consolidate_and_medianalyse(fresh_db, monkeypatch):
     monkeypatch.setattr(controller.core, "medianalyse_land", _fake_medianalyse_land)
     ret = controller.LandController.medianalyse(core.Namespace(name=name))
     assert ret == 1
+
+
+def test_land_seorank_cli(fresh_db, monkeypatch):
+    controller = fresh_db["controller"]
+    core = fresh_db["core"]
+    model = fresh_db["model"]
+
+    name = rand_name("land")
+    assert controller.LandController.create(core.Namespace(name=name, desc="d", lang=["fr"])) == 1
+    land = model.Land.get(model.Land.name == name)
+    domain = model.Domain.create(name="example.com")
+    expr = model.Expression.create(
+        land=land,
+        domain=domain,
+        url="https://example.com/",
+        http_status='200',
+        relevance=2,
+    )
+    # Expression that should be skipped (bad http status)
+    model.Expression.create(
+        land=land,
+        domain=domain,
+        url="https://example.com/404",
+        http_status='404',
+        relevance=5,
+    )
+    # Expression skipped by min relevance
+    model.Expression.create(
+        land=land,
+        domain=domain,
+        url="https://example.com/lowrel",
+        http_status='200',
+        relevance=0,
+    )
+
+    monkeypatch.setattr(controller.settings, "seorank_api_key", "", raising=False)
+    monkeypatch.setattr(core.settings, "seorank_api_key", "", raising=False)
+    ret = controller.LandController.seorank(core.Namespace(name=name, limit=0, depth=None, force=False))
+    assert ret == 0
+
+    monkeypatch.setattr(controller.settings, "seorank_api_key", "TEST", raising=False)
+    monkeypatch.setattr(core.settings, "seorank_api_key", "TEST", raising=False)
+    monkeypatch.setattr(controller.settings, "seorank_request_delay", 0, raising=False)
+    monkeypatch.setattr(core.settings, "seorank_request_delay", 0, raising=False)
+
+    calls = {"n": 0}
+
+    def fake_fetch(url, key):
+        calls["n"] += 1
+        return {"url": url, "score": 42}
+
+    monkeypatch.setattr(core, "fetch_seorank_for_url", fake_fetch)
+
+    ret = controller.LandController.seorank(core.Namespace(name=name, limit=0, depth=None, force=False, http=None, minrel=None))
+    assert ret == 1
+
+    updated_expr = model.Expression.get(model.Expression.id == expr.id)
+    assert json.loads(updated_expr.seorank)["score"] == 42
+    assert calls["n"] == 1
+
+    calls["n"] = 0
+    ret = controller.LandController.seorank(core.Namespace(name=name, limit=0, depth=None, force=False, http=None, minrel=None))
+    assert ret == 1
+    assert calls["n"] == 0
+
+
+def test_land_urlist_cli(fresh_db, monkeypatch):
+    controller = fresh_db["controller"]
+    core = fresh_db["core"]
+    model = fresh_db["model"]
+
+    name = rand_name("land")
+    assert controller.LandController.create(core.Namespace(name=name, desc="d", lang=["fr"])) == 1
+    land = model.Land.get(model.Land.name == name)
+
+    # Missing API key should short-circuit with a failure status.
+    monkeypatch.setattr(controller.settings, "serpapi_api_key", "", raising=False)
+    monkeypatch.setattr(core.settings, "serpapi_api_key", "", raising=False)
+    ret = controller.LandController.urlist(core.Namespace(
+        name=name,
+        query="test",
+        lang=["fr"],
+        datestart=None,
+        dateend=None,
+        timestep="week",
+        sleep=0.0,
+    ))
+    assert ret == 0
+
+    # Prepare environment with an existing expression to check updates/duplicates.
+    monkeypatch.setattr(controller.settings, "serpapi_api_key", "TEST", raising=False)
+    monkeypatch.setattr(core.settings, "serpapi_api_key", "TEST", raising=False)
+
+    existing_url = "https://existing.com/article"
+    existing_expr = controller.core.add_expression(land, existing_url)
+    assert existing_expr is not False
+    existing_expr.title = None
+    existing_expr.save()
+
+    mock_results = [
+        {"link": existing_url, "title": "Existing title", "position": 1, "date": "2024-01-01"},
+        {"link": "https://newsite.com/story", "title": "New title", "position": 2, "date": "2024-01-02"},
+        {"link": None, "title": "Ignore", "position": 3, "date": None},
+    ]
+
+    monkeypatch.setattr(controller.core, "fetch_serpapi_url_list", lambda **_: mock_results, raising=True)
+    monkeypatch.setattr(core, "fetch_serpapi_url_list", lambda **_: mock_results, raising=True)
+
+    ret = controller.LandController.urlist(core.Namespace(
+        name=name,
+        query="gilets jaunes",
+        lang=["fr"],
+        datestart=None,
+        dateend=None,
+        timestep="week",
+        sleep=0.0,
+    ))
+    assert ret == 1
+
+    expressions = list(model.Expression.select().where(model.Expression.land == land))
+    assert len(expressions) == 2
+
+    updated_existing = model.Expression.get(model.Expression.url == existing_url)
+    assert updated_existing.title == "Existing title"
+
+    created = model.Expression.get(model.Expression.url == "https://newsite.com/story")
+    assert created.title == "New title"
 
 
 def test_domain_crawl_cli(fresh_db, monkeypatch):

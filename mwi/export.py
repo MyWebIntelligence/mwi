@@ -5,6 +5,7 @@ Contains custom SQL to be exported in specified file formats
 
 import csv
 import datetime
+import json
 import re
 from textwrap import dedent
 import unicodedata
@@ -89,8 +90,21 @@ class Export:
             WHERE e.land_id = ? AND relevance >= ?
             GROUP BY e.id
         """
-        cursor = self.get_sql_cursor(sql, col_map)
-        return self.write_csv(filename, col_map.keys(), cursor)
+        records, seorank_keys = self._fetch_page_rows_with_seorank(col_map, sql)
+        base_keys = list(col_map.keys())
+        header = base_keys + seorank_keys
+
+        count = 0
+        with open(filename, 'w', newline='\n', encoding='utf-8') as file:
+            writer = csv.writer(file, quoting=csv.QUOTE_ALL)
+            if records:
+                writer.writerow(header)
+                for base_data, seorank_payload in records:
+                    row = [self._normalize_value(base_data.get(key)) for key in base_keys]
+                    row.extend(self._normalize_value(seorank_payload.get(key)) for key in seorank_keys)
+                    writer.writerow(row)
+                    count += 1
+        return count
 
     def write_fullpagecsv(self, filename) -> int:
         """
@@ -197,6 +211,68 @@ class Export:
         file.close()
         return count
 
+    def _fetch_page_rows_with_seorank(self, column_map: dict, sql: str):
+        """Return base row data and parsed SEO Rank payloads, plus discovered keys."""
+        select_map = dict(column_map)
+        select_map['_seorank'] = 'e.seorank'
+        cursor = self.get_sql_cursor(sql, select_map)
+        rows = cursor.fetchall()
+
+        records = []
+        seorank_keys = set()
+        for row in rows:
+            data = dict(zip(select_map.keys(), row))
+            payload = self._parse_seorank_payload(data.pop('_seorank', None))
+            if payload:
+                seorank_keys.update(payload.keys())
+            base_data = {key: data.get(key) for key in column_map.keys()}
+            records.append((base_data, payload))
+
+        return records, sorted(seorank_keys)
+
+    @staticmethod
+    def _parse_seorank_payload(payload) -> dict:
+        """Safely decode the raw SEO Rank JSON payload into a flat dict."""
+        if payload is None:
+            return {}
+        if isinstance(payload, memoryview):
+            payload = payload.tobytes()
+        if isinstance(payload, bytes):
+            payload = payload.decode('utf-8', errors='ignore')
+        payload = str(payload).strip()
+        if not payload:
+            return {}
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        # Ensure keys are strings for consistent header ordering
+        return {str(key): value for key, value in data.items()}
+
+    @staticmethod
+    def _normalize_value(value):
+        """Normalize export values, mapping missing/unknown entries to 'na'."""
+        if value is None:
+            return 'na'
+        if isinstance(value, memoryview):
+            value = value.tobytes().decode('utf-8', errors='ignore')
+        if isinstance(value, bytes):
+            value = value.decode('utf-8', errors='ignore')
+        if isinstance(value, (list, dict)):
+            if not value:
+                return 'na'
+            value = json.dumps(value, ensure_ascii=False)
+        if isinstance(value, (int, float)):
+            return value
+        val_str = str(value).strip()
+        if not val_str:
+            return 'na'
+        if val_str.lower() == 'unknown':
+            return 'na'
+        return val_str
+
     def write_pagegexf(self, filename) -> int:
         """
         Page GEXF writer
@@ -204,15 +280,13 @@ class Export:
         :return:
         """
         count = 0
-        gexf_attributes = [
+        base_attributes = [
             ('title', 'string'),
             ('description', 'string'),
             ('keywords', 'string'),
             ('domain_id', 'string'),
             ('relevance', 'integer'),
             ('depth', 'integer')]
-
-        gexf, nodes, edges = self.get_gexf(gexf_attributes)
 
         node_map = {
             'id': 'e.id',
@@ -235,14 +309,22 @@ class Export:
             JOIN domain AS d ON d.id = e.domain_id
             WHERE land_id = ? AND relevance >= ?
         """
-        cursor = self.get_sql_cursor(sql, node_map)
+        records, seorank_keys = self._fetch_page_rows_with_seorank(node_map, sql)
 
-        for row in cursor:
-            self.gexf_node(
-                dict(zip(node_map.keys(), row)),
-                nodes,
-                gexf_attributes,
-                ('url', 'relevance'))
+        extra_attributes = [(key, 'string') for key in seorank_keys]
+        gexf_attributes = base_attributes + extra_attributes
+        gexf, nodes, edges = self.get_gexf(gexf_attributes)
+
+        for base_data, seorank_payload in records:
+            row = dict(base_data)
+            row['url'] = self._normalize_value(row.get('url'))
+            row['relevance'] = self._normalize_value(row.get('relevance'))
+            for attr_name, _ in base_attributes:
+                row[attr_name] = self._normalize_value(row.get(attr_name))
+            for key in seorank_keys:
+                row[key] = self._normalize_value(seorank_payload.get(key))
+
+            self.gexf_node(row, nodes, gexf_attributes, ('url', 'relevance'))
             count += 1
 
         edge_map = {

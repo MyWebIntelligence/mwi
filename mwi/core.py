@@ -2,12 +2,16 @@
 Core functions
 """
 import asyncio
+import calendar
 import json
+import random
 import re
+import time
 from argparse import Namespace
+from datetime import date, datetime, timedelta
 from os import path
-from typing import Union, Optional
-from urllib.parse import urlparse, urljoin
+from typing import Dict, List, Optional, Tuple, Union
+from urllib.parse import urlparse, urljoin, quote
 
 import aiohttp # type: ignore
 import nltk # type: ignore
@@ -211,6 +215,279 @@ def get_arg_option(name: str, args: Namespace, set_type, default):
     if (name in args_dict) and (args_dict[name] is not None):
         return set_type(args_dict[name])
     return default
+
+
+class SerpApiError(Exception):
+    """Raised when a SerpAPI request or response fails."""
+
+
+def fetch_serpapi_url_list(
+    api_key: str,
+    query: str,
+    lang: str = 'fr',
+    datestart: Optional[str] = None,
+    dateend: Optional[str] = None,
+    timestep: str = 'week',
+    sleep_seconds: float = 1.0
+) -> List[Dict[str, Optional[Union[str, int]]]]:
+    """Query SerpAPI for Google organic results and return URL metadata.
+
+    The function mirrors the behaviour of the original R helper: it optionally
+    walks a date range in fixed windows, paginates through Google result pages,
+    and collects the ``organic_results`` payload.
+
+    Args:
+        api_key: SerpAPI secret key (required).
+        query: Search query sent to SerpAPI.
+        lang: Language code used for Google ``gl/hl`` parameters.
+        datestart: Optional lower bound (``YYYY-MM-DD``) for the search window.
+        dateend: Optional upper bound (``YYYY-MM-DD``) for the search window.
+        timestep: Window size when iterating between ``datestart`` and
+            ``dateend`` (``day`` | ``week`` | ``month``).
+        sleep_seconds: Base delay between HTTP calls to avoid rate limits.
+
+    Returns:
+        A list of dictionaries containing ``position``, ``title``, ``link`` and
+        ``date`` keys extracted from the SerpAPI response.
+
+    Raises:
+        SerpApiError: if the query is empty, the date range is invalid, or the
+            HTTP request/response is not usable.
+    """
+
+    normalized_query = (query or '').strip()
+    if not normalized_query:
+        raise SerpApiError('Query must be a non-empty string')
+
+    lang = (lang or 'fr').strip() or 'fr'
+    timestep = (timestep or 'week').strip().lower() or 'week'
+
+    if bool(datestart) ^ bool(dateend):
+        raise SerpApiError('Both datestart and dateend must be provided together')
+
+    date_windows = list(_build_serpapi_windows(datestart, dateend, timestep))
+    if not date_windows:
+        date_windows = [(None, None)]  # Always run at least once without a date filter.
+
+    aggregated: List[Dict[str, Optional[Union[str, int]]]] = []
+
+    base_url = getattr(settings, 'serpapi_base_url', 'https://serpapi.com/search')
+    timeout = getattr(settings, 'serpapi_timeout', 15)
+    jitter_floor, jitter_ceil = 0.8, 1.2
+    page_size = 100
+
+    for window_start, window_end in date_windows:
+        # Pagination resets for every date window so we can cover the full range.
+        start_index = 0
+        while True:
+            params = {
+                'api_key': api_key,
+                'engine': 'google',
+                'q': normalized_query,
+                'google_domain': _serpapi_google_domain(lang),
+                'gl': lang,
+                'hl': lang,
+                'lr': f'lang_{lang}',
+                'safe': 'off',
+                'num': page_size,
+                'start': start_index,
+            }
+
+            if window_start and window_end:
+                # Google accepts the date constraint through the tbs parameter.
+                params['tbs'] = _build_serpapi_tbs(window_start, window_end)
+
+            try:
+                response = requests.get(base_url, params=params, timeout=timeout)
+            except requests.RequestException as exc:  # pragma: no cover - network failure
+                raise SerpApiError(f'HTTP error during SerpAPI request: {exc}') from exc
+
+            if response.status_code != 200:
+                snippet = response.text[:200]
+                raise SerpApiError(
+                    f'SerpAPI request failed with status {response.status_code}: {snippet}'
+                )
+
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                raise SerpApiError('Invalid JSON payload returned by SerpAPI') from exc
+
+            if 'error' in payload:
+                raise SerpApiError(f"SerpAPI error: {payload['error']}")
+
+            organic_results = payload.get('organic_results') or []
+            if not organic_results:
+                break
+
+            for entry in organic_results:
+                # Keep a compact structure: position/title/link/date match the R helper output.
+                aggregated.append({
+                    'position': entry.get('position'),
+                    'title': entry.get('title'),
+                    'link': entry.get('link'),
+                    'date': entry.get('date'),
+                })
+
+            start_index += page_size
+
+            has_next_page = bool(payload.get('serpapi_pagination', {}).get('next'))
+            if not has_next_page and len(organic_results) < page_size:
+                break
+
+            # Light jitter mirrors the original R helper and reduces rate-limit risks.
+            effective_sleep = max(0.0, float(sleep_seconds)) * random.uniform(jitter_floor, jitter_ceil)
+            if effective_sleep > 0:
+                time.sleep(effective_sleep)
+
+    return aggregated
+
+
+def _build_serpapi_windows(
+    datestart: Optional[str],
+    dateend: Optional[str],
+    timestep: str
+) -> List[Tuple[date, date]]:
+    """Return inclusive date windows matching the R helper behaviour."""
+
+    if not datestart or not dateend:
+        return []
+
+    start_date = _parse_serpapi_date(datestart)
+    end_date = _parse_serpapi_date(dateend)
+    if start_date > end_date:
+        raise SerpApiError('datestart must be earlier than or equal to dateend')
+
+    current_start = start_date
+    step = timestep.lower()
+    windows: List[Tuple[date, date]] = []
+
+    while current_start <= end_date:
+        next_start = _advance_date(current_start, step)
+        window_end = min(end_date, next_start - timedelta(days=1))
+        windows.append((current_start, window_end))
+        current_start = next_start
+
+    return windows
+
+
+def _advance_date(current: date, timestep: str) -> date:
+    """Advance ``current`` by the given timestep (day|week|month)."""
+
+    if timestep == 'day':
+        return current + timedelta(days=1)
+    if timestep == 'week':
+        return current + timedelta(weeks=1)
+    if timestep == 'month':
+        year = current.year + (current.month // 12)
+        month = current.month % 12 + 1
+        day = min(current.day, calendar.monthrange(year, month)[1])
+        return date(year, month, day)
+    raise SerpApiError('timestep must be one of: day, week, month')
+
+
+def _parse_serpapi_date(value: str) -> date:
+    """Parse a YYYY-MM-DD string into a ``date`` and validate the format."""
+
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError as exc:
+        raise SerpApiError(f'Invalid date "{value}" — expected YYYY-MM-DD') from exc
+
+
+def _build_serpapi_tbs(start: date, end: date) -> str:
+    """Build the Google ``tbs`` parameter encoding a closed date range."""
+
+    return 'cdr:1,cd_min:{},cd_max:{}'.format(
+        start.strftime('%m/%d/%Y'),
+        end.strftime('%m/%d/%Y')
+    )
+
+
+def _serpapi_google_domain(lang: str) -> str:
+    """Return a Google domain TLD matching the language heuristic."""
+
+    lang = lang.lower()
+    if lang == 'fr':
+        return 'google.fr'
+    if lang == 'en':
+        return 'google.com'
+    return 'google.com'
+
+
+def fetch_seorank_for_url(url: str, api_key: str) -> Optional[dict]:
+    """Call the SEO Rank API for a single URL and return the JSON payload."""
+    base_url = getattr(settings, 'seorank_api_base_url', '').strip()
+    if not base_url:
+        base_url = 'https://seo-rank.my-addr.com/api2/moz+sr+fb'
+
+    # API expects the raw URL path; keep common URL separators unescaped
+    safe_url = quote(url, safe=':/?&=%')
+    request_url = f"{base_url.rstrip('/')}/{api_key}/{safe_url}"
+    try:
+        response = requests.get(request_url, timeout=getattr(settings, 'seorank_timeout', 15))
+    except requests.RequestException as exc:
+        print(f"[seorank] HTTP error for {url}: {exc}")
+        return None
+
+    if response.status_code != 200:
+        print(f"[seorank] Unexpected status {response.status_code} for {url}")
+        return None
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        snippet = response.text[:120].replace('\n', ' ')
+        print(f"[seorank] JSON decoding failed for {url}: {exc} (body preview: {snippet})")
+        return None
+
+
+def update_seorank_for_land(
+    land: model.Land,
+    api_key: str,
+    limit: int = 0,
+    depth: Optional[int] = None,
+    http_status: Optional[str] = '200',
+    min_relevance: int = 1,
+    force_refresh: bool = False,
+) -> tuple[int, int]:
+    """Fetch SEO Rank data for land expressions and store the raw JSON payload."""
+    expressions = model.Expression.select().where(model.Expression.land == land)
+
+    if depth is not None:
+        expressions = expressions.where(model.Expression.depth == depth)
+
+    # HTTP filter: default to 200 unless user explicitly requests otherwise.
+    if http_status:
+        http_status_normalized = http_status.strip().lower()
+        if http_status_normalized not in ('all', 'any', 'none', ''):
+            expressions = expressions.where(model.Expression.http_status == http_status.strip())
+    
+    if min_relevance is not None and min_relevance > 0:
+        expressions = expressions.where(model.Expression.relevance >= min_relevance)
+
+    if not force_refresh:
+        expressions = expressions.where(model.Expression.seorank.is_null(True))
+
+    expressions = expressions.order_by(model.Expression.id)
+    if limit and limit > 0:
+        expressions = expressions.limit(limit)
+
+    processed = 0
+    updated = 0
+    sleep_seconds = max(0.0, float(getattr(settings, 'seorank_request_delay', 0)))
+
+    for expression in expressions:
+        processed += 1
+        payload = fetch_seorank_for_url(str(expression.url), api_key)
+        if payload is not None:
+            expression.seorank = json.dumps(payload)
+            expression.save(only=[model.Expression.seorank])
+            updated += 1
+        if sleep_seconds:
+            time.sleep(sleep_seconds)
+
+    return processed, updated
 
 
 def stem_word(word: str) -> str:
