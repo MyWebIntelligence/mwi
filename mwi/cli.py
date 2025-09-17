@@ -100,6 +100,28 @@ def command_input():
                         help='Merge strategy for readable: smart_merge, mercury_priority, preserve_existing',
                         default='smart_merge',
                         nargs='?')
+    parser.add_argument('--query',
+                        type=str,
+                        help='Search query to fetch URLs from SerpAPI',
+                        nargs='?')
+    parser.add_argument('--datestart',
+                        type=str,
+                        help='Start date (YYYY-MM-DD) for SerpAPI urlist filtering',
+                        nargs='?')
+    parser.add_argument('--dateend',
+                        type=str,
+                        help='End date (YYYY-MM-DD) for SerpAPI urlist filtering',
+                        nargs='?')
+    parser.add_argument('--timestep',
+                        type=str,
+                        help='Date window size when iterating between datestart/dateend (day|week|month)',
+                        default='week',
+                        nargs='?')
+    parser.add_argument('--sleep',
+                        type=float,
+                        help='Base delay (seconds) between SerpAPI calls to avoid rate limits',
+                        default=1.0,
+                        nargs='?')
     parser.add_argument('--threshold',
                         type=float,
                         help='Similarity threshold for embeddings',
@@ -157,8 +179,10 @@ def dispatch(args):
             'export':   LandController.export,
             'addterm':  LandController.addterm,
             'addurl':   LandController.addurl,
+            'urlist':   LandController.urlist,
             'consolidate': LandController.consolidate,
             'medianalyse': LandController.medianalyse,
+            'seorank':  LandController.seorank,
             # Nested commands for LLM features
             'llm': {
                 'validate': LandController.llm_validate,

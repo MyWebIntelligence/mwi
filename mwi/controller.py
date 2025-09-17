@@ -203,6 +203,50 @@ class LandController:
             return 0
 
     @staticmethod
+    def seorank(args: core.Namespace):
+        """Enrichit les expressions d'un land avec les données SEO Rank."""
+        core.check_args(args, 'name')
+
+        api_key = getattr(settings, 'seorank_api_key', '')
+        if not api_key:
+            print('[seorank] API key missing — set settings.seorank_api_key or MWI_SEORANK_API_KEY')
+            return 0
+
+        land = model.Land.get_or_none(model.Land.name == args.name)
+        if land is None:
+            print(f'Land "{args.name}" not found')
+            return 0
+
+        limit = core.get_arg_option('limit', args, set_type=int, default=0)
+        depth = core.get_arg_option('depth', args, set_type=int, default=None)
+        http_status = core.get_arg_option('http', args, set_type=str, default='200')
+        min_relevance = core.get_arg_option('minrel', args, set_type=int, default=1)
+        force_refresh = bool(getattr(args, 'force', False))
+
+        processed, updated = core.update_seorank_for_land(
+            land=land,
+            api_key=api_key,
+            limit=limit,
+            depth=depth,
+            http_status=http_status,
+            min_relevance=min_relevance,
+            force_refresh=force_refresh,
+        )
+
+        if processed == 0:
+            print(f"[seorank] No expressions selected for land {args.name} (check depth/force options)")
+
+        limit_display = limit if limit > 0 else 'all'
+        depth_display = 'all' if depth is None else depth
+        http_display = http_status if http_status not in (None, '', 'all', 'ALL') else 'all'
+        print(
+            f"[seorank] Completed for land {args.name}: processed={processed}, "
+            f"updated={updated}, limit={limit_display}, depth={depth_display}, "
+            f"http={http_display}, minrel={min_relevance}, force={force_refresh}"
+        )
+        return 1
+
+    @staticmethod
     def consolidate(args: core.Namespace):
         """
         Consolidate a land: recalculates relevance, links, media, adds missing docs, recreates links, replaces old ones.
@@ -389,6 +433,78 @@ class LandController:
             print('%s URLs created in land %s' % (urls_count, args.land))
             return 1
         return 0
+
+    @staticmethod
+    def urlist(args: core.Namespace):
+        """Retrieve URLs from SerpAPI and add them to the land expressions table."""
+        core.check_args(args, ('name', 'query'))
+
+        # API key lookup mirrors other integrations (settings first, then env var).
+        api_key = getattr(settings, 'serpapi_api_key', '') or os.getenv('MWI_SERPAPI_API_KEY', '')
+        if not api_key:
+            print('[urlist] SerpAPI key missing — set settings.serpapi_api_key or MWI_SERPAPI_API_KEY')
+            return 0
+
+        land = model.Land.get_or_none(model.Land.name == args.name)
+        if land is None:
+            print('Land "%s" not found' % args.name)
+            return 0
+
+        # CLI stores languages as a list; keep the first entry for the request.
+        lang_list = getattr(args, 'lang', ['fr'])
+        lang = lang_list[0] if isinstance(lang_list, list) and lang_list else 'fr'
+        datestart = getattr(args, 'datestart', None)
+        dateend = getattr(args, 'dateend', None)
+        timestep = getattr(args, 'timestep', 'week') or 'week'
+        sleep_seconds = core.get_arg_option('sleep', args, set_type=float, default=1.0)
+
+        try:
+            # Centralised helper handles pagination, date windows and error reporting.
+            serp_results = core.fetch_serpapi_url_list(
+                api_key=api_key,
+                query=args.query,
+                lang=lang,
+                datestart=datestart,
+                dateend=dateend,
+                timestep=timestep,
+                sleep_seconds=sleep_seconds
+            )
+        except core.SerpApiError as error:
+            print(f'[urlist] {error}')
+            return 0
+
+        added = 0
+        skipped = 0
+        for item in serp_results:
+            url = item.get('link')
+            if not url:
+                skipped += 1
+                continue
+
+            existing = model.Expression.get_or_none(
+                (model.Expression.land == land) & (model.Expression.url == url)
+            )
+            title = item.get('title')
+            if existing is not None:
+                # Update the title if we collected one and the expression is still blank.
+                if title and not existing.title:
+                    existing.title = title
+                    existing.save()
+                skipped += 1
+                continue
+
+            expression = core.add_expression(land, url)
+            if expression:
+                # Newly created expressions keep the title for downstream exports.
+                if title and not expression.title:
+                    expression.title = title
+                    expression.save()
+                added += 1
+            else:
+                skipped += 1
+
+        print(f'[urlist] Added {added} new URLs, skipped {skipped} (existing or invalid) for land {args.name}')
+        return 1
 
     @staticmethod
     def delete(args: core.Namespace):

@@ -256,11 +256,34 @@ python mywi.py domain crawl [--limit N] [--http 404]
 python mywi.py land export --name="MonSujet" --type=pagecsv|pagegexf|fullpagecsv|nodecsv|nodegexf|mediacsv|corpus|pseudolinks|pseudolinkspage|pseudolinksdomain [--minrel R]
 ```
 
+Les exports `pagecsv` et `pagegexf` ajoutent automatiquement les champs SEO Rank présents dans `expression.seorank`; les valeurs absentes ou `unknown` deviennent `na`.
+
 ### Médias — analyse
 ```bash
 python mywi.py land medianalyse --name=LAND [--depth D] [--minrel R]
 ```
 Résultats en base (dimensions, taille, format, couleurs, EXIF, pHash). Réglages dans `settings.py`.
+
+### Indicateurs SEO (API SEO Rank)
+```bash
+python mywi.py land seorank --name=LAND [--limit N] [--depth D] [--http 200] [--minrel 1] [--force]
+```
+Enrichit chaque expression avec la réponse JSON de l’API SEO Rank, stockée dans `expression.seorank`. Renseigner `settings.seorank_api_key` ou la variable d’environnement `MWI_SEORANK_API_KEY` avant exécution.
+
+- Par défaut, seules les expressions avec `http_status=200` et `relevance ≥ 1` sont ciblées ; utilisez `--http=all` ou `--minrel=0` pour élargir la sélection.
+
+**Principaux champs du payload**
+- `sr_domain` – domaine concerné par les métriques.
+- `sr_rank` – score d’autorité calculé par SEO Rank (plus faible = meilleure visibilité).
+- `sr_kwords` – nombre de mots-clés suivis pour le domaine.
+- `sr_traffic` – estimation mensuelle du trafic organique.
+- `sr_costs` – équivalent budgétaire estimé du trafic organique (USD).
+- `sr_ulinks` – liens sortants uniques détectés sur l’URL.
+- `sr_hlinks` – volume total de backlinks (liens http) vers l’URL.
+- `sr_dlinks` – nombre de domaines référents distincts.
+- `fb_comments` – commentaires Facebook recensés.
+- `fb_shares` – partages Facebook recensés.
+- `fb_reac` – réactions Facebook (likes, etc.) recensées.
 
 ### Heuristiques
 ```bash
@@ -324,3 +347,4 @@ Il sauvegarde, tente `.recover` puis `.dump`, reconstruit une nouvelle DB et vé
 ## Licence
 
 Projet sous la licence indiquée dans le fichier LICENSE.
+- Par défaut, seules les expressions `http_status=200` et `relevance ≥ 1` sont traitées ; passer `--http=all` ou `--minrel=0` pour élargir la sélection.

@@ -88,6 +88,8 @@ class Expression(BaseModel):
     validllm = CharField(max_length=3, null=True)
     # validmodel stores the OpenRouter model slug used for the verdict
     validmodel = CharField(max_length=100, null=True)
+    # seorank persists the raw JSON payload returned by the SEO Rank API for the URL
+    seorank = TextField(null=True)
 
 
 class ExpressionLink(BaseModel):
