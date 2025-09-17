@@ -7,60 +7,17 @@ MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers i
 ## Table of Contents
 
 - [Features](#features)
-- [Architecture & Internals](#architecture--internals)
-  - [File Structure & Flow](#file-structure--flow)
-  - [Database Schema (SQLite, via Peewee)](#database-schema-sqlite-via-peewee)
-  - [Main Workflows](#main-workflows)
-  - [Implementation Notes](#implementation-notes)
-  - [Settings](#settings)
-    - [Embeddings configuration](#embeddings-configuration)
-    - [Optional: OpenRouter Relevance Gate (AI yes/no filter)](#optional-openrouter-relevance-gate-ai-yesno-filter)
-    - [Bulk LLM Validation (yes/no)](#bulk-llm-validation-yesno)
-    - [SEO Rank enrichment](#seo-rank-enrichment)
-    - [SerpAPI bootstrap (`land urlist`)](#serpapi-bootstrap-land-urlist)
-  - [Testing](#testing-1)
-  - [Extending](#extending)
 - [Installation](#installation)
-  - [Using Docker Compose (recommended)](#using-docker-compose-recommended)
-  - [Using Docker (manual)](#using-docker-manual)
+  - [Using Docker](#using-docker)
   - [Local Development Setup](#local-development-setup)
 - [Usage](#usage)
   - [General Notes](#general-notes)
   - [Land Management](#land-management)
-  - [Land Consolidation Pipeline](#land-consolidation-pipeline)
-    - [1. Create a New Land](#1-create-a-new-land)
-    - [2. List Created Lands](#2-list-created-lands)
-    - [3. Add Terms to a Land](#3-add-terms-to-a-land)
-    - [4. Add URLs to a Land](#4-add-urls-to-a-land)
-    - [5. Gather URLs from SerpAPI (Google)](#5-gather-urls-from-serpapi-google)
-    - [6. Delete a Land or Expressions](#6-delete-a-land-or-expressions)
   - [Data Collection](#data-collection)
-    - [1. Crawl Land URLs](#1-crawl-land-urls)
-    - [2. Fetch Readable Content (Mercury Parser Pipeline)](#2-fetch-readable-content-mercury-parser-pipeline)
-    - [3. Capture SEO Rank Metrics](#3-capture-seo-rank-metrics)
   - [Domain Management](#domain-management)
-    - [1. Crawl Domains](#1-crawl-domains)
   - [Exporting Data](#exporting-data)
-    - [1. Export Land Data](#1-export-land-data)
-    - [2. Media Analysis](#2-media-analysis)
-    - [2. Export Tag Data](#2-export-tag-data)
   - [Heuristics](#heuristics)
-    - [1. Update Domains from Heuristic Settings](#1-update-domains-from-heuristic-settings)
 - [Testing](#testing)
-- [Embeddings & Pseudolinks (User Guide)](#embeddings--pseudolinks-user-guide)
-  - [Purpose](#purpose)
-  - [Prerequisites & Install](#prerequisites--install)
-  - [Language Models (NLI)](#language-models-nli)
-  - [Settings (Key Reference)](#settings-key-reference)
-  - [Commands & Parameters](#commands--parameters)
-  - [Troubleshooting & Caution](#troubleshooting--caution)
-  - [Best Practices — Performance](#best-practices--performance)
-  - [Model Choice and Fallbacks](#model-choice-and-fallbacks)
-  - [Progress & Logs](#progress--logs)
-  - [Similarity Methods](#similarity-methods)
-  - [ANN Backend Selection (FAISS)](#ann-backend-selection-faiss)
-  - [Scalable Similarity (Large Lands)](#scalable-similarity-large-lands)
-  - [NLI Relations (ANN + Cross‑Encoder)](#nli-relations-ann--crossencoder)
 - [SQLite Recovery](#sqlite-recovery)
 - [License](#license)
 
@@ -235,11 +192,11 @@ pages (`--sleep`) to avoid rate limits; set it to `0` for tests/mocks only.
 
 ---
 
-## Installation
+# Installation
 
 You can install MyWI using Docker (recommended for ease of use) or by setting up a local development environment.
 
-### Using Docker Compose (recommended)
+## Using Docker Compose (recommended)
 
 The simplest way to run MyWI is with Docker Compose. It keeps your database and exports in a folder you control, and gives you an interactive container for the CLI. This section is written for beginners.
 
@@ -307,7 +264,7 @@ Choosing the data location — common cases
   - Windows: `HOST_DATA_DIR=C:/Users/Alice/mywi_data`
   Then run `docker compose up -d --build` and use the CLI as shown above.
 
-### Using Docker (manual)
+## Using Docker (manual)
 
 **Prerequisites:**
 *   Python 3.10+ (for understanding the project, not strictly for running Docker if image is pre-built)
@@ -399,7 +356,7 @@ To test the dynamic media extraction functionality:
 python test_dynamic_media.py
 ```
 
-### Local Development Setup
+## Local Development Setup
 
 **Prerequisites:**
 *   Python 3.10+
@@ -468,56 +425,22 @@ python test_dynamic_media.py
 
 You are now ready to use MyWI commands as described in the [Usage](#usage) section using `(venv) python mywi.py ...`.
 
-## Usage
+# Usage
 
-### General Notes
+## General Notes
 
 *   Commands are run using `python mywi.py ...`.
 *   If using Docker, first execute `docker exec -it mwi bash` to enter the container. The prompt might be `root@<container_id>:/app#` or similar.
 *   If using a local development setup, ensure your virtual environment is activated (e.g., `(venv)` prefix in your prompt).
 *   Arguments like `LAND_NAME` or `TERMS` are placeholders; replace them with your actual values.
 
-### Land Management
+## Land Management
 
 A "Land" is a central concept in MyWI, representing a specific research area or topic.
 
 ---
 
-### Land Consolidation Pipeline
-
-The `land consolidate` pipeline is designed to re-compute and repair the internal structure of a land after the database has been modified by third-party applications (such as MyWebClient) or external scripts.
-
-**Purpose:**  
-- Recalculates the relevance score for each crawled page (expressions with a non-null `fetched_at`).
-- Re-extracts and recreates all outgoing links (ExpressionLink) and media (Media) for these pages.
-- Adds any missing documents referenced by links.
-- Rebuilds the link graph and media associations from scratch, replacing any outdated or inconsistent data.
-
-**When to use:**  
-- After importing or modifying data in the database with external tools (e.g., MyWebClient).
-- To restore consistency if links or media are out of sync with the actual page content.
-
-**Command:**
-```bash
-python mywi.py land consolidate --name=LAND_NAME [--limit=LIMIT] [--depth=NbDEEP]
-```
-- `--name` (required): Name of the land to consolidate.
-- `--limit` (optional): Maximum number of pages to process.
-- `--depth` (optional): Only process pages at the specified crawl depth.
-
-**Example:**
-```bash
-python mywi.py land consolidate --name="AsthmaResearch" --depth=0
-```
-
-**Notes:**
-- Only pages that have already been crawled (`fetched_at` is set) are affected.
-- For each page, the number of extracted links and media is displayed.
-- This pipeline is especially useful after bulk imports, migrations, or when using third-party clients that may not maintain all MyWI invariants.
-
----
-
-#### 1. Create a New Land
+### 1. Create a New Land
 
 Create a new land (research topic/project).
 
@@ -538,7 +461,7 @@ python mywi.py land create --name="AsthmaResearch" --desc="Research on asthma an
 
 ---
 
-#### 2. List Created Lands
+### 2. List Created Lands
 
 List all lands or show properties of a specific land.
 
@@ -557,7 +480,7 @@ List all lands or show properties of a specific land.
 
 ---
 
-#### 3. Add Terms to a Land
+### 3. Add Terms to a Land
 
 Add keywords or phrases to a land.
 
@@ -572,7 +495,7 @@ python mywi.py land addterm --land="MyResearchTopic" --terms="keyword1, keyword2
 
 ---
 
-#### 4. Add URLs to a Land
+### 4. Add URLs to a Land
 
 Add URLs to a land, either directly or from a file.
 
@@ -594,7 +517,7 @@ Add URLs to a land, either directly or from a file.
 
 ---
 
-#### 5. Gather URLs from SerpAPI (Google)
+### 5. Gather URLs from SerpAPI (Google)
 
 Bootstrap a land with URLs coming from Google search results via SerpAPI. Only
 new URLs are inserted; existing entries keep their data but receive a title if
@@ -620,7 +543,7 @@ python mywi.py land urlist --name="MyResearchTopic" --query="(gilets jaunes) OR 
 
 ---
 
-#### 6. Delete a Land or Expressions
+### 6. Delete a Land or Expressions
 
 Delete an entire land or only expressions below a relevance threshold.
 
@@ -640,9 +563,9 @@ Delete an entire land or only expressions below a relevance threshold.
 | --maxrel | float  | No       |         | Only delete expressions with relevance < maxrel      |
 
 
-### Data Collection
+## Data Collection
 
-#### 1. Crawl Land URLs
+### 1. Crawl Land URLs
 
 Crawl the URLs added to a land to fetch their content.
 
@@ -668,7 +591,7 @@ python mywi.py land crawl --name="AsthmaResearch" --depth=1 --limit=5
 
 ---
 
-#### 2. Fetch Readable Content (Mercury Parser Pipeline)
+### 2. Fetch Readable Content (Mercury Parser Pipeline)
 
 Extract high-quality, readable content using the **Mercury Parser autonomous pipeline**. This modern system provides intelligent content extraction with configurable merge strategies and automatic media/link enrichment.
 
@@ -743,7 +666,7 @@ python mywi.py land readable --name="AsthmaResearch" --limit=100 --depth=1 --mer
 
 ---
 
-#### 3. Capture SEO Rank Metrics
+### 3. Capture SEO Rank Metrics
 
 Fetch SEO Rank metrics for each expression and store the raw JSON payload in the database.
 
@@ -799,41 +722,8 @@ python mywi.py land seorank --name="AsthmaResearch" --force
 - `fb_shares` – Facebook share events recorded for the URL.
 - `fb_reac` – Facebook reactions (likes, etc.) recorded for the URL.
 
-### Domain Management
 
-#### 1. Crawl Domains
-
-Get information from domains that were identified from expressions added to lands.
-
-```bash
-python mywi.py domain crawl [--limit=NUMBER] [--http=HTTP_STATUS_CODE]
-```
-
-| Option   | Type   | Required | Default | Description                                                                 |
-|----------|--------|----------|---------|-----------------------------------------------------------------------------|
-| --limit  | int    | No       |         | Maximum number of domains to crawl in this run                              |
-| --http   | str    | No       |         | Re-crawl only domains that previously resulted in this HTTP error (e.g., 503) |
-
-**Examples:**
-```bash
-python mywi.py domain crawl
-python mywi.py domain crawl --limit=5
-python mywi.py domain crawl --http=404
-```
-
----
-
-### Exporting Data
-
-Export data from your lands or tags for analysis in other tools.
-
-#### 1. Export Land Data
-
-Export data from a land in various formats.
-
-`pagecsv` and `pagegexf` include any SEO Rank fields stored in `expression.seorank`; missing or `unknown` values are exported as `na`.
-
-#### 2. Media Analysis
+### 4. Media Analysis
 
 Analyze media files (images, videos, audio) associated with expressions in a land. This command will fetch media, analyze its properties, and store the results in the database.
 
@@ -858,6 +748,39 @@ python mywi.py land medianalyse --name="AsthmaResearch" --depth=2 --minrel=0.5
 - The results, including dimensions, file size, format, dominant colors, EXIF data, and perceptual hash, are stored in the database.
 
 ---
+
+### 5. Crawl Domains
+
+Get information from domains that were identified from expressions added to lands.
+
+```bash
+python mywi.py domain crawl [--limit=NUMBER] [--http=HTTP_STATUS_CODE]
+```
+
+| Option   | Type   | Required | Default | Description                                                                 |
+|----------|--------|----------|---------|-----------------------------------------------------------------------------|
+| --limit  | int    | No       |         | Maximum number of domains to crawl in this run                              |
+| --http   | str    | No       |         | Re-crawl only domains that previously resulted in this HTTP error (e.g., 503) |
+
+**Examples:**
+```bash
+python mywi.py domain crawl
+python mywi.py domain crawl --limit=5
+python mywi.py domain crawl --http=404
+```
+
+---
+
+## Exporting Data
+
+Export data from your lands or tags for analysis in other tools.
+
+### 1. Export Land Data
+
+Export data from a land in various formats.
+
+`pagecsv` and `pagegexf` include any SEO Rank fields stored in `expression.seorank`; missing or `unknown` values are exported as `na`.
+
 
 ```bash
 python mywi.py land export --name="MyResearchTopic" --type=EXPORT_TYPE [--minrel=MINIMUM_RELEVANCE]
@@ -892,7 +815,7 @@ python mywi.py land export --name="AsthmaResearch" --type=pseudolinksdomain
 
 ---
 
-#### 2. Export Tag Data
+### 2. Export Tag Data
 
 Export tag-based data for a land.
 
@@ -918,9 +841,7 @@ python mywi.py tag export --name="AsthmaResearch" --type=content --minrel=0.5
 
 ---
 
-### Heuristics
-
-#### 1. Update Domains from Heuristic Settings
+## Update Domains from Heuristic Settings
 
 Update domain information based on predefined or learned heuristics.
 
@@ -930,6 +851,39 @@ python mywi.py heuristic update
 
 _No options for this command._
 
+## Land Consolidation Pipeline
+
+The `land consolidate` pipeline is designed to re-compute and repair the internal structure of a land after the database has been modified by third-party applications (such as MyWebClient) or external scripts.
+
+**Purpose:**  
+- Recalculates the relevance score for each crawled page (expressions with a non-null `fetched_at`).
+- Re-extracts and recreates all outgoing links (ExpressionLink) and media (Media) for these pages.
+- Adds any missing documents referenced by links.
+- Rebuilds the link graph and media associations from scratch, replacing any outdated or inconsistent data.
+
+**When to use:**  
+- After importing or modifying data in the database with external tools (e.g., MyWebClient).
+- To restore consistency if links or media are out of sync with the actual page content.
+
+**Command:**
+```bash
+python mywi.py land consolidate --name=LAND_NAME [--limit=LIMIT] [--depth=NbDEEP]
+```
+- `--name` (required): Name of the land to consolidate.
+- `--limit` (optional): Maximum number of pages to process.
+- `--depth` (optional): Only process pages at the specified crawl depth.
+
+**Example:**
+```bash
+python mywi.py land consolidate --name="AsthmaResearch" --depth=0
+```
+
+**Notes:**
+- Only pages that have already been crawled (`fetched_at` is set) are affected.
+- For each page, the number of extracted links and media is displayed.
+- This pipeline is especially useful after bulk imports, migrations, or when using third-party clients that may not maintain all MyWI invariants.
+
+---
 
 ## Testing
 
@@ -944,10 +898,11 @@ pytest tests/test_cli.py
 To run a specific test method within a file:
 ```bash
 pytest tests/test_cli.py::test_functional_test
+```
 
-## Embeddings & Pseudolinks (User Guide)
+#  Embeddings & Pseudolinks (User Guide)
 
-### Purpose
+## Purpose
 - Build paragraph‑level vectors (embeddings) from pages, then link similar paragraphs across pages (“pseudolinks”).
 - Optionally classify each pair with an NLI model (entailment/neutral/contradiction).
 - Export paragraph links, plus aggregated links at page and domain levels.
@@ -958,7 +913,7 @@ Typical flow
 3) Compute similarities (cosine or ANN+NLI)
 4) Export as CSV (paragraph/page/domain)
 
-### Prerequisites & Install
+## Prerequisites & Install
 - Database initialized and pages have readable text.
 - Create a clean pip‑only venv and install base deps:
   ```bash
@@ -976,14 +931,16 @@ Typical flow
   python mywi.py embedding check
   ```
 
-### Language Models (NLI)
+
+## Models
+-Pseudo Links
 - Multilingual (recommended):
   - MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
 - Lightweight fallback (English):
   - typeform/distilbert-base-uncased-mnli
 - Set in `settings.py:nli_model_name` (both examples are documented there).
 
-### Settings (Key Reference)
+## Settings (Key Reference)
 - Embeddings (bi‑encoder):
   - `embed_provider`: 'fake' | 'http' | 'openai' | 'mistral' | 'gemini' | 'huggingface' | 'ollama'
   - `embed_model_name`, `embed_batch_size`, `embed_min_paragraph_chars`, `embed_max_paragraph_chars`
@@ -1001,7 +958,7 @@ Typical flow
   - `OMP_NUM_THREADS=N` (FAISS/Torch/NumPy OpenMP threads)
   - Optional: `MKL_NUM_THREADS=N`, `OPENBLAS_NUM_THREADS=N`, `TOKENIZERS_PARALLELISM=false`
 
-### Commands & Parameters
+## Commands & Parameters
 - Generate embeddings:
   ```bash
   python mywi.py embedding generate --name=LAND [--limit N]
@@ -1039,14 +996,14 @@ Typical flow
   - Check env: `python mywi.py embedding check`
   - Reset embeddings for a land: `python mywi.py embedding reset --name=LAND`
 
-### Troubleshooting & Caution
+## Troubleshooting & Caution
 - “All `score_raw=0.5` and `score=0`” → neutral fallback; install ML extras or switch to the safe EN model.
 - “No `score_raw` column” → run `python mywi.py db migrate` once.
 - macOS segfaults (OpenMP/Torch): pip‑only venv; try `OMP_NUM_THREADS=1`, then raise; optional `KMP_DUPLICATE_LIB_OK=TRUE`.
 - Slow scoring: lower `nli_batch_size`, raise threads moderately, filter with `--minrel`, cap with `--maxpairs`.
 - Too many pairs: raise `threshold`, increase `lshbits`, lower `topk`, or use `--minrel`.
 
-### Best Practices — Performance
+## Best Practices — Performance
 
 Quick guidelines for speed vs. quality:
 
@@ -1096,20 +1053,20 @@ Quick guidelines for speed vs. quality:
   - Track progress every `nli_progress_every_pairs` pairs, with throughput (pairs/s) and ETA.
   - If throughput is low, lower `nli_max_tokens` or `nli_batch_size`, and/or raise `--minrel`.
 
-### Model Choice and Fallbacks
+## Model Choice and Fallbacks
 
 - Default NLI model can be multilingual (DeBERTa‑based) and may require `sentencepiece`.
 - Safe alternative (English): `typeform/distilbert-base-uncased-mnli`.
 - Configure in `settings.py:nli_model_name`.
 - If dependencies are missing, the code can fall back to a neutral predictor (`score=0`, `score_raw=0.5`).
 
-### Progress & Logs
+## Progress & Logs
 
 - Recall logs every few hundred paragraphs (candidate pairs count).
 - NLI scoring logs progress every `settings.nli_progress_every_pairs` pairs with throughput and ETA.
 - Final summary prints total pairs, elapsed time, and pairs/s.
 
-### Similarity Methods
+## Similarity Methods
 
 Pick a method with `--method` when running `embedding similarity`:
 
@@ -1124,7 +1081,7 @@ Pick a method with `--method` when running `embedding similarity`:
   - Step 2 (Precision): Cross‑Encoder NLI returns RelationScore ∈ {-1, 0, 1} and ConfidenceScore.
   - Uses `--backend`, `--topk`, `--minrel`, `--maxpairs`. See below for FAISS.
 
-### ANN Backend Selection (FAISS)
+## ANN Backend Selection (FAISS)
 
 - Install FAISS (optional): `pip install faiss-cpu`.
 - CLI override: `--backend=faiss` to force FAISS recall for `--method=nli`.
@@ -1132,7 +1089,7 @@ Pick a method with `--method` when running `embedding similarity`:
 - Fallback: if FAISS is not installed or import fails, recall uses `bruteforce` automatically.
 - Verify: `python mywi.py embedding check` prints `FAISS: available` when detected.
 
-### Scalable Similarity (Large Lands)
+## Scalable Similarity (Large Lands)
 
 For large collections (hundreds of thousands to millions of paragraphs), prefer the LSH-based method and constrain search/output:
 
@@ -1159,7 +1116,7 @@ Tuning suggestions:
 - Start with `--lshbits=20`, `--topk=10–20`, `--threshold=0.85`, `--minrel=1`.
 - If too many pairs, increase `lshbits`, raise `threshold`, or lower `topk`.
 
-### NLI Relations (ANN + Cross‑Encoder)
+## NLI Relations (ANN + Cross‑Encoder)
 
 Classify logical relations between paragraphs (entailment/paraphrase = 1, neutral = 0, contradiction = -1) using a two‑step pipeline: ANN recall then Cross‑Encoder NLI.
 
@@ -1210,8 +1167,10 @@ Quick environment check:
 ```bash
 python mywi.py embedding check
 ```
+
 Shows provider config, optional libs (faiss/sentence-transformers/transformers), and DB tables availability.
-```
+
+# Troubleshooting & repairing
 
 ## SQLite Recovery
 
@@ -1247,7 +1206,8 @@ mv data/mwi_repaired.db data/mwi.db
 
 Note: You can temporarily point the app to a different data directory using the `MWI_DATA_LOCATION` environment variable; it overrides `settings.py:data_location` for that session.
 
-## License
+# License
 
 This project is licensed under the terms of the LICENSE file. (Assuming a LICENSE file exists in the repository, e.g., MIT, Apache 2.0).
 If `LICENSE` is the actual name of the file, you can link to it: [LICENSE](LICENSE).
+
