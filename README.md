@@ -281,8 +281,8 @@ Choosing the data location — common cases
 
 2.  **Clone the Project:**
     ```bash
-    git clone https://github.com/MyWebIntelligence/MyWebIntelligencePython.git
-    cd MyWebIntelligencePython
+    git clone https://github.com/MyWebIntelligence/mwi.git
+    cd mwi
     ```
 
 3.  **Configure the data location (optional):**
@@ -367,8 +367,8 @@ python test_dynamic_media.py
 
 1.  **Clone the Project:**
     ```bash
-    git clone https://github.com/MyWebIntelligence/MyWebIntelligencePython.git
-    cd MyWebIntelligencePython
+    git clone https://github.com/MyWebIntelligence/mwi.git
+    cd mwi
     ```
 
 2.  **Create and Activate Virtual Environment (macOS / Linux):**
@@ -1210,4 +1210,3 @@ Note: You can temporarily point the app to a different data directory using the 
 
 This project is licensed under the terms of the LICENSE file. (Assuming a LICENSE file exists in the repository, e.g., MIT, Apache 2.0).
 If `LICENSE` is the actual name of the file, you can link to it: [LICENSE](LICENSE).
-
