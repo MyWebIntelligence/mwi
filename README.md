@@ -216,6 +216,13 @@ Prerequisites:
   - macOS/Linux: `HOST_DATA_DIR=/Users/you/mywi_data`
   - Windows: `HOST_DATA_DIR=C:/Users/you/mywi_data`
 
+- Copy the sample settings and adjust credentials if needed (the file is ignored by git):
+  ```bash
+  cp settings-example.py settings.py
+  ```
+  - Put API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) directly in `settings.py` **or** expose them in `.env` using the `MWI_*` variables shown in `settings-example.py`.
+  - For Docker Compose, adding lines such as `MWI_SERPAPI_API_KEY=...` to `.env` overrides the defaults without modifying the file again.
+
 1) Build and start the container
 ```bash
 docker compose up -d --build
@@ -285,7 +292,15 @@ Choosing the data location — common cases
     cd mwi
     ```
 
-3.  **Configure the data location (optional):**
+3.  **Prepare `settings.py`:**
+    Copy the template and provide your secrets. The resulting file stays untracked.
+    ```bash
+    cp settings-example.py settings.py
+    ```
+    - Fill in API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) directly in `settings.py` **or** plan to pass them as environment variables like `MWI_SERPAPI_API_KEY` when running the container.
+    - You can mount a host-side version of `settings.py` into the container if you prefer editing it outside the image.
+
+4.  **Configure the data location (optional):**
     For beginners, the simplest approach is to mount your host folder at `/app/data`. The app’s default path is `data` → it resolves to `/app/data`. No code changes are required.
     - Case 1 (recommended): mount to `/app/data` (no changes)
       - macOS/Linux :
@@ -309,14 +324,14 @@ Choosing the data location — common cases
         mwi:latest
       ```
 
-4.  **Build the Docker Image:**
+5.  **Build the Docker Image:**
     ```bash
     docker build -t mwi:latest .
     # Using mwi:1.2 as per original, but latest is also common
     # docker build -t mwi:1.2 . 
     ```
 
-5.  **Run the Docker Container:**
+6.  **Run the Docker Container:**
     Replace `/path/to/your/host/data` with your actual folder. Recommended mapping is to `/app/data`:
     ```bash
     docker run -dit --name mwi -v /path/to/your/host/data:/app/data mwi:latest
@@ -331,12 +346,12 @@ Choosing the data location — common cases
     *   `--name mwi`: Assign a name to the container
     *   `-v /path/to/your/host/data:/app/data`: Mount your host data directory to `/app/data` inside the container (matches app default).
 
-6.  **Access the Container Shell:**
+7.  **Access the Container Shell:**
     ```bash
     docker exec -it mwi bash
     ```
 
-7.  **Setup Database (inside the container):**
+8.  **Setup Database (inside the container):**
     If this is the first time, or if the database doesn't exist in your mounted volume:
     ```bash
     # Inside the Docker container
@@ -407,11 +422,15 @@ python test_dynamic_media.py
         ```
     Your command prompt should now be prefixed with `(venv)`.
 
-6.  **Configure Data Location:**
-    Create a data directory anywhere on your system. Then, edit the `settings.py` file in the project directory and update `data_location` to the absolute path of this directory.
+6.  **Create `settings.py` and configure paths/API keys:**
+    ```bash
+    cp settings-example.py settings.py
+    ```
+    - Create a data directory anywhere on your system and update the `data_location` value in `settings.py` to the absolute path of this directory.
+    - Provide API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) by editing the file or exporting environment variables such as `MWI_SERPAPI_API_KEY` before running commands.
     ```python
     # settings.py
-    data_location = "/path/to/your/local/data" 
+    data_location = "/path/to/your/local/data"
     # e.g., "C:/Users/YourUser/mywi_data" on Windows
     # or "/Users/youruser/mywi_data" on macOS/Linux
     ```
