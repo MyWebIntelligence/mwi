@@ -1172,6 +1172,20 @@ Shows provider config, optional libs (faiss/sentence-transformers/transformers),
 
 # Troubleshooting & repairing
 
+## Keep the database schema current
+
+When pulling a newer version of MyWI, make sure your existing database has the latest columns and indexes.
+
+```bash
+python mywi.py db migrate
+```
+
+This command is idempotent: it inspects `data/mwi.db` (or the location specified via `MWI_DATA_LOCATION`) and adds any missing fields. Run it after every upgrade or before sharing a database. For safety, back up the file first:
+
+```bash
+cp data/mwi.db data/mwi.db.bak_$(date +%Y%m%d_%H%M%S)
+```
+
 ## SQLite Recovery
 
 If your SQLite database becomes corrupted (e.g., "database disk image is malformed"), you can attempt a non-destructive recovery with the included helper script. It backs up the original DB, tries `sqlite3 .recover` (then `.dump` as a fallback), rebuilds a new DB, and verifies integrity.
