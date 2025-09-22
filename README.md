@@ -361,29 +361,45 @@ python test_dynamic_media.py
 **Prerequisites:**
 *   Python 3.10+
 *   `pip` (Python package installer)
-*   `virtualenv` (Python environment isolation tool)
 *   `git`
 
 **Steps:**
 
-1.  **Install `virtualenv` (if not already installed):**
-    ```bash
-    pip install virtualenv
-    ```
-
-2.  **Clone the Project:**
+1.  **Clone the Project:**
     ```bash
     git clone https://github.com/MyWebIntelligence/MyWebIntelligencePython.git
     cd MyWebIntelligencePython
     ```
 
-3.  **Create and Activate Virtual Environment:**
+2.  **Create and Activate Virtual Environment (macOS / Linux):**
+    Modern Python versions come with `venv` built-in.
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    ```
+    *(Note: If `python3` doesn't work, try `python`)*
 
-    *   **macOS / Linux:**
-        ```bash
-        virtualenv venv
-        source venv/bin/activate
-        ```
+3.  **Install Dependencies:**
+    This step installs the project itself in "editable" mode, which is necessary to make imports like `from mwi.core...` work correctly.
+    ```bash
+    pip install -e .
+    pip install -r requirements.txt
+    pip install -r requirements-ml.txt
+    ```
+
+4.  **Install Playwright Browsers:**
+    This is required for dynamic media analysis (scraping JavaScript-heavy sites).
+    ```bash
+    python install_playwright.py
+    ```
+
+5.  **Verify Installation (Optional):**
+    You can run a test to ensure everything is working.
+    ```bash
+    python tests/test_dynamic_media.py
+    ```
+    This command should now run without any `ImportError`.
+
     *   **Windows:**
         ```bash
         python -m venv venv
@@ -391,7 +407,7 @@ python test_dynamic_media.py
         ```
     Your command prompt should now be prefixed with `(venv)`.
 
-4.  **Configure Data Location:**
+6.  **Configure Data Location:**
     Create a data directory anywhere on your system. Then, edit the `settings.py` file in the project directory and update `data_location` to the absolute path of this directory.
     ```python
     # settings.py
@@ -400,28 +416,12 @@ python test_dynamic_media.py
     # or "/Users/youruser/mywi_data" on macOS/Linux
     ```
 
-5.  **Install Dependencies:**
-    ```bash
-    (venv) pip install -r requirements.txt
-    ```
-
-6.  **Install Playwright Browsers (Optional - for Dynamic Media Extraction):**
-    ```bash
-    (venv) python install_playwright.py
-    ```
-    This step is optional but recommended if you want to use the dynamic media extraction feature for JavaScript-generated content.
-
 7.  **Setup Database:**
     ```bash
     (venv) python mywi.py db setup
     ```
     This command creates the database file in the `data_location` you specified. Warning: it will destroy any previous data if the database file already exists from a prior setup.
 
-8.  **Test Installation (Optional):**
-    ```bash
-    (venv) python test_dynamic_media.py
-    ```
-    This tests both basic URL resolution and dynamic media extraction (if Playwright is installed).
 
 You are now ready to use MyWI commands as described in the [Usage](#usage) section using `(venv) python mywi.py ...`.
 

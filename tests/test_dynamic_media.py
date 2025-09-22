@@ -6,8 +6,11 @@ import asyncio
 import sys
 import os
 
-# Ajouter le répertoire parent au PYTHONPATH pour les imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Ajouter la racine du projet au PYTHONPATH pour les imports
+tests_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(tests_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 try:
     from mwi import model, core
