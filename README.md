@@ -331,6 +331,7 @@ Your data stays in the host folder you mounted in Step 5. Re-running the contain
     ```bash
     git clone https://github.com/MyWebIntelligence/mwi.git
     cd mwi
+    mkdir data
     ```
 
 2.  **Create and Activate Virtual Environment (macOS / Linux):**
