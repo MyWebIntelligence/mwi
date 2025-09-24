@@ -37,161 +37,6 @@ MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers i
 
 ---
 
-## Architecture & Internals
-
-### File Structure & Flow
-
-```
-mywi.py  →  mwi/cli.py  →  mwi/controller.py  →  mwi/core.py & mwi/export.py
-                                     ↘︎ mwi/model.py (Peewee ORM)
-                                     ↘︎ mwi/embedding_pipeline.py (paragraph embeddings)
-```
-
-- **mywi.py**: Console entry-point, runs CLI.
-- **mwi/cli.py**: Parses CLI args, dispatches commands to controllers.
-- **mwi/controller.py**: Maps verbs to business logic in core/export/model.
-- **mwi/core.py**: Main algorithms (crawling, parsing, pipelines, scoring, etc.).
-- **mwi/export.py**: Exporters (CSV, GEXF, corpus).
-- **mwi/model.py**: Database schema (Peewee ORM).
-
-### Database Schema (SQLite, via Peewee)
-
-- **Land**: Research project/topic.
-- **Word**: Normalized vocabulary.
-- **LandDictionary**: Many-to-many Land/Word.
-- **Domain**: Unique website/domain.
-- **Expression**: Individual URL/page.
-- **ExpressionLink**: Directed link between Expressions.
-- **Media**: Images, videos, audio in Expressions.
-- **Paragraph / ParagraphEmbedding / ParagraphSimilarity**: Paragraph store, embeddings, and semantic links (pseudolinks).
-- **Tag**: Hierarchical tags.
-- **TaggedContent**: Snippets tagged in Expressions.
-  - Expression extra fields: `validllm` (yes/no), `validmodel` (OpenRouter model used), and `seorank` (raw SEO Rank API JSON)
-
-### Main Workflows
-
-- **Project Bootstrap**: `python mywi.py db setup`
-- **Media Analysis**: `python mywi.py land medianalyse --name=LAND_NAME [--depth=DEPTH] [--minrel=MIN_RELEVANCE]`
-- **Land Life-Cycle**: Create, add terms, add URLs, crawl, extract readable, export, clean/delete.
-- **SEO Rank Enrichment**: `python mywi.py land seorank --name=LAND [--limit N] [--depth D] [--force]`
-- **Domain Processing**: `python mywi.py domain crawl`
-- **Tag Export**: `python mywi.py tag export`
-- **Heuristics Update**: `python mywi.py heuristic update`
-- **Embeddings & Similarity**:
-  - Generate: `python mywi.py embedding generate --name=LAND [--limit N]`
-  - Similarity: `python mywi.py embedding similarity --name=LAND [--threshold 0.85] [--method cosine]`
-
-### Implementation Notes
-
-- **Relevance Score**: Weighted sum of lemma hits in title/content.
-- **Async Batching**: Polite concurrency for crawling.
-- **Media Extraction**: Only `.jpg` images kept, media saved for later download.
-- **Export**: Multiple formats, dynamic SQL, GEXF with attributes.
-
-### Settings
-
-Key variables in `settings.py`:
-- `data_location`, `user_agent`, `parallel_connections`, `default_timeout`, `archive`, `heuristics`.
-
-#### Embeddings configuration
-- `embed_provider`: 'fake' (local deterministic) or 'http'
-- Providers supported: `fake`, `http`, `openai`, `mistral`, `gemini`, `huggingface`, `ollama`
-- `embed_api_url`: URL for generic HTTP provider (POST {"model": name, "input": [texts...]})
-- `embed_model_name`: model label stored alongside vectors
-- `embed_batch_size`: batch size when calling the provider
-- `embed_min_paragraph_chars` / `embed_max_paragraph_chars`: paragraph length bounds
-- `embed_similarity_threshold` / `embed_similarity_method`: similarity gate and method
-  
-Provider-specific keys:
-- OpenAI: `embed_openai_base_url` (default `https://api.openai.com/v1`), `embed_openai_api_key`
-- Mistral: `embed_mistral_base_url` (default `https://api.mistral.ai/v1`), `embed_mistral_api_key`
-- Gemini: `embed_gemini_base_url` (default `https://generativelanguage.googleapis.com/v1beta`), `embed_gemini_api_key` (query param)
-- Hugging Face: `embed_hf_base_url` (default `https://api-inference.huggingface.co/models`), `embed_hf_api_key`
-- Ollama: `embed_ollama_base_url` (default `http://localhost:11434`)
-  
-Notes:
-- OpenAI/Mistral expect payload `{ "model": name, "input": [texts...] }` and return `{ "data": [{"embedding": [...]}, ...] }`.
-- Gemini uses `:batchEmbedContents` and returns `{ "embeddings": [{"values": [...]}, ...] }`.
-- Hugging Face accepts `{ "inputs": [texts...] }` and typically returns a list of vectors.
-- Ollama (local) does not batch: sequential calls to `/api/embeddings` with `{ "model": name, "prompt": text }`.
-
-#### Optional: OpenRouter Relevance Gate (AI yes/no filter)
-
-If enabled, pages are first judged by an LLM (via OpenRouter) as relevant (yes) or not (no). A "no" sets `relevance=0` and skips further processing; otherwise, the classic weighted relevance is computed. This applies during crawl/readable/consolidation, but not during bulk recomputation (`land addterm`).
-
-Environment-configurable variables:
-- `MWI_OPENROUTER_ENABLED` (default `false`)
-- `MWI_OPENROUTER_API_KEY`
-- `MWI_OPENROUTER_MODEL` (e.g. `openai/gpt-4o-mini`, `anthropic/claude-3-haiku`)
-- `MWI_OPENROUTER_TIMEOUT` (default `15` seconds)
-- `MWI_OPENROUTER_READABLE_MAX_CHARS` (default `6000`)
-- `MWI_OPENROUTER_MAX_CALLS_PER_RUN` (default `500`)
-
-Note: When disabled or not configured, the system behaves exactly as before.
-
-#### Bulk LLM Validation (yes/no)
-Validate relevance in bulk via OpenRouter and record the verdict in DB (`expression.validllm`, `expression.validmodel`).
-
-Command:
-```bash
-python mywi.py land llm validate --name=LAND [--limit N] [--force]
-```
-
-Requirements:
-- In `settings.py`: set `openrouter_enabled=True`, and provide `openrouter_api_key` and `openrouter_model`.
-- If your DB is old: `python mywi.py db migrate` (adds columns if missing).
-
-Behavior:
-- For each expression without a verdict, call the LLM to answer yes/no.
-- Saves `validllm` = `"oui"|"non"` (French) and `validmodel` = model slug.
-  - Filtering: only processes expressions with no "oui/non" verdict where `readable` is NOT NULL and has length ≥ `openrouter_readable_min_chars`.
-  - Respects `openrouter_readable_min_chars`, `openrouter_readable_max_chars` and `openrouter_max_calls_per_run`.
-  - If the verdict is `"non"`, the expression's `relevance` is set to `0`.
-
-`--force` option:
-- Also includes expressions with an existing `"non"` verdict in the selection (does not include `"oui"`).
-
-#### SEO Rank enrichment
-
-The `land seorank` command enriches each expression with the raw SEO Rank API payload. Configure these keys in `settings.py` (or via environment variables):
-
-- `seorank_api_base_url`: Base endpoint (defaults to `https://seo-rank.my-addr.com/api2/moz+sr+fb`).
-- `seorank_api_key`: Required API key (`MWI_SEORANK_API_KEY` overrides the default).
-- `seorank_timeout`: Request timeout in seconds.
-- `seorank_request_delay`: Pause between calls to stay polite with the provider.
-
-By default the command only targets expressions with `http_status = 200` and `relevance ≥ 1`; pass `--http=all` or `--minrel=0` to broaden the selection.
-
-Without a valid API key the command exits early. Use `--force` to refresh entries that already contain data in `expression.seorank`.
-
-#### SerpAPI bootstrap (`land urlist`)
-
-The `land urlist` command queries Google via SerpAPI and pushes new URLs to a
-land. Configure the following values in `settings.py` or via environment
-variables:
-
-- `serpapi_api_key`: Required API key (`MWI_SERPAPI_API_KEY` overrides the default).
-- `serpapi_base_url`: Base endpoint (defaults to `https://serpapi.com/search`).
-- `serpapi_timeout`: HTTP timeout in seconds.
-
-Date filters (`--datestart`, `--dateend`, `--timestep`) are optional but must be
-provided as valid `YYYY-MM-DD` strings when used. The command sleeps between
-pages (`--sleep`) to avoid rate limits; set it to `0` for tests/mocks only.
-
-### Testing
-
-- `tests/test_cli.py`: CLI smoke tests.
-- `tests/test_core.py`, etc.: Unit tests for extraction, parsing, export.
-
-### Extending
-
-- Add export: implement `Export.write_<type>`, update controller.
-- Change language: pass `--lang` at land creation.
-- Add headers/proxy: edit `settings` or patch session logic.
-- Custom tags: use tag hierarchy, export flattens to paths.
-
----
-
 # Installation
 
 You can install MyWI using Docker (recommended for ease of use) or by setting up a local development environment.
@@ -202,6 +47,20 @@ Docker Compose is the easiest way to run MyWI because it installs everything in 
 
 ### Prerequisites
 - Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose) and start it before continuing.
+
+### Prerequisites:
+
+Python 3.10+
+pip (Python package installer)
+git
+
+### Step 0 – Clone the Project:
+```bash
+git clone https://github.com/MyWebIntelligence/mwi.git
+cd mwi
+mkdir data
+ls # check 'data' dir
+```
 
 ### Step 1 – Prepare the configuration files
 1. Copy `.env.example` to `.env`.
@@ -218,6 +77,7 @@ Docker Compose is the easiest way to run MyWI because it installs everything in 
 ### Step 2 – Build and start the services
 ```bash
 docker compose up -d --build
+# Subsequent runs can use `docker compose up -d` only
 ```
 The first run downloads dependencies, so it can take a few minutes. Subsequent runs can use `docker compose up -d`.
 
@@ -226,28 +86,7 @@ The first run downloads dependencies, so it can take a few minutes. Subsequent r
 docker compose exec mwi python mywi.py db setup
 ```
 
-### Step 4 – Run CLI commands
-Use `docker compose exec mwi python mywi.py ...` for every command. Examples:
-```bash
-docker compose exec mwi python mywi.py land create --name="MyTopic" --desc="…" --lang=fr
-docker compose exec mwi python mywi.py land addurl --land="MyTopic" --urls="https://example.org"
-docker compose exec mwi python mywi.py land crawl --name="MyTopic" --limit=10
-docker compose exec mwi python mywi.py land readable --name="MyTopic" --merge=smart_merge
-docker compose exec mwi python mywi.py land export --name="MyTopic" --type=pagecsv
-```
-
-### Step 5 – Optional extras
-- Install Playwright browsers for dynamic media extraction:
-  ```bash
-  docker compose exec mwi python install_playwright.py
-  ```
-- Build the image with machine-learning extras (FAISS + transformers) if you plan to use embeddings/NLI locally:
-  ```bash
-  MYWI_WITH_ML=1 docker compose build
-  docker compose up -d
-  ```
-
-### Step 6 – Stop or reset the environment
+### Step 4 – Stop or reset the environment
 ```bash
 docker compose down          # stop the container
 docker compose down -v       # stop and delete the Docker volume (DESTROYS the database)
@@ -268,6 +107,8 @@ Use this path if you prefer plain Docker commands instead of Docker Compose.
 ```bash
 git clone https://github.com/MyWebIntelligence/mwi.git
 cd mwi
+mkdir data
+ls # check 'data' dir
 ```
 
 ### Step 2 – Prepare the settings file
@@ -1186,6 +1027,163 @@ mv data/mwi_repaired.db data/mwi.db
 ```
 
 Note: You can temporarily point the app to a different data directory using the `MWI_DATA_LOCATION` environment variable; it overrides `settings.py:data_location` for that session.
+
+# For Developpers
+
+## Architecture & Internals
+
+### File Structure & Flow
+
+```
+mywi.py  →  mwi/cli.py  →  mwi/controller.py  →  mwi/core.py & mwi/export.py
+                                     ↘︎ mwi/model.py (Peewee ORM)
+                                     ↘︎ mwi/embedding_pipeline.py (paragraph embeddings)
+```
+
+- **mywi.py**: Console entry-point, runs CLI.
+- **mwi/cli.py**: Parses CLI args, dispatches commands to controllers.
+- **mwi/controller.py**: Maps verbs to business logic in core/export/model.
+- **mwi/core.py**: Main algorithms (crawling, parsing, pipelines, scoring, etc.).
+- **mwi/export.py**: Exporters (CSV, GEXF, corpus).
+- **mwi/model.py**: Database schema (Peewee ORM).
+
+### Database Schema (SQLite, via Peewee)
+
+- **Land**: Research project/topic.
+- **Word**: Normalized vocabulary.
+- **LandDictionary**: Many-to-many Land/Word.
+- **Domain**: Unique website/domain.
+- **Expression**: Individual URL/page.
+- **ExpressionLink**: Directed link between Expressions.
+- **Media**: Images, videos, audio in Expressions.
+- **Paragraph / ParagraphEmbedding / ParagraphSimilarity**: Paragraph store, embeddings, and semantic links (pseudolinks).
+- **Tag**: Hierarchical tags.
+- **TaggedContent**: Snippets tagged in Expressions.
+  - Expression extra fields: `validllm` (yes/no), `validmodel` (OpenRouter model used), and `seorank` (raw SEO Rank API JSON)
+
+### Main Workflows
+
+- **Project Bootstrap**: `python mywi.py db setup`
+- **Media Analysis**: `python mywi.py land medianalyse --name=LAND_NAME [--depth=DEPTH] [--minrel=MIN_RELEVANCE]`
+- **Land Life-Cycle**: Create, add terms, add URLs, crawl, extract readable, export, clean/delete.
+- **SEO Rank Enrichment**: `python mywi.py land seorank --name=LAND [--limit N] [--depth D] [--force]`
+- **Domain Processing**: `python mywi.py domain crawl`
+- **Tag Export**: `python mywi.py tag export`
+- **Heuristics Update**: `python mywi.py heuristic update`
+- **Embeddings & Similarity**:
+  - Generate: `python mywi.py embedding generate --name=LAND [--limit N]`
+  - Similarity: `python mywi.py embedding similarity --name=LAND [--threshold 0.85] [--method cosine]`
+
+### Implementation Notes
+
+- **Relevance Score**: Weighted sum of lemma hits in title/content.
+- **Async Batching**: Polite concurrency for crawling.
+- **Media Extraction**: Only `.jpg` images kept, media saved for later download.
+- **Export**: Multiple formats, dynamic SQL, GEXF with attributes.
+
+### Settings
+
+Key variables in `settings.py`:
+- `data_location`, `user_agent`, `parallel_connections`, `default_timeout`, `archive`, `heuristics`.
+
+#### Embeddings configuration
+- `embed_provider`: 'fake' (local deterministic) or 'http'
+- Providers supported: `fake`, `http`, `openai`, `mistral`, `gemini`, `huggingface`, `ollama`
+- `embed_api_url`: URL for generic HTTP provider (POST {"model": name, "input": [texts...]})
+- `embed_model_name`: model label stored alongside vectors
+- `embed_batch_size`: batch size when calling the provider
+- `embed_min_paragraph_chars` / `embed_max_paragraph_chars`: paragraph length bounds
+- `embed_similarity_threshold` / `embed_similarity_method`: similarity gate and method
+  
+Provider-specific keys:
+- OpenAI: `embed_openai_base_url` (default `https://api.openai.com/v1`), `embed_openai_api_key`
+- Mistral: `embed_mistral_base_url` (default `https://api.mistral.ai/v1`), `embed_mistral_api_key`
+- Gemini: `embed_gemini_base_url` (default `https://generativelanguage.googleapis.com/v1beta`), `embed_gemini_api_key` (query param)
+- Hugging Face: `embed_hf_base_url` (default `https://api-inference.huggingface.co/models`), `embed_hf_api_key`
+- Ollama: `embed_ollama_base_url` (default `http://localhost:11434`)
+  
+Notes:
+- OpenAI/Mistral expect payload `{ "model": name, "input": [texts...] }` and return `{ "data": [{"embedding": [...]}, ...] }`.
+- Gemini uses `:batchEmbedContents` and returns `{ "embeddings": [{"values": [...]}, ...] }`.
+- Hugging Face accepts `{ "inputs": [texts...] }` and typically returns a list of vectors.
+- Ollama (local) does not batch: sequential calls to `/api/embeddings` with `{ "model": name, "prompt": text }`.
+
+#### Optional: OpenRouter Relevance Gate (AI yes/no filter)
+
+If enabled, pages are first judged by an LLM (via OpenRouter) as relevant (yes) or not (no). A "no" sets `relevance=0` and skips further processing; otherwise, the classic weighted relevance is computed. This applies during crawl/readable/consolidation, but not during bulk recomputation (`land addterm`).
+
+Environment-configurable variables:
+- `MWI_OPENROUTER_ENABLED` (default `false`)
+- `MWI_OPENROUTER_API_KEY`
+- `MWI_OPENROUTER_MODEL` (e.g. `openai/gpt-4o-mini`, `anthropic/claude-3-haiku`)
+- `MWI_OPENROUTER_TIMEOUT` (default `15` seconds)
+- `MWI_OPENROUTER_READABLE_MAX_CHARS` (default `6000`)
+- `MWI_OPENROUTER_MAX_CALLS_PER_RUN` (default `500`)
+
+Note: When disabled or not configured, the system behaves exactly as before.
+
+#### Bulk LLM Validation (yes/no)
+Validate relevance in bulk via OpenRouter and record the verdict in DB (`expression.validllm`, `expression.validmodel`).
+
+Command:
+```bash
+python mywi.py land llm validate --name=LAND [--limit N] [--force]
+```
+
+Requirements:
+- In `settings.py`: set `openrouter_enabled=True`, and provide `openrouter_api_key` and `openrouter_model`.
+- If your DB is old: `python mywi.py db migrate` (adds columns if missing).
+
+Behavior:
+- For each expression without a verdict, call the LLM to answer yes/no.
+- Saves `validllm` = `"oui"|"non"` (French) and `validmodel` = model slug.
+  - Filtering: only processes expressions with no "oui/non" verdict where `readable` is NOT NULL and has length ≥ `openrouter_readable_min_chars`.
+  - Respects `openrouter_readable_min_chars`, `openrouter_readable_max_chars` and `openrouter_max_calls_per_run`.
+  - If the verdict is `"non"`, the expression's `relevance` is set to `0`.
+
+`--force` option:
+- Also includes expressions with an existing `"non"` verdict in the selection (does not include `"oui"`).
+
+#### SEO Rank enrichment
+
+The `land seorank` command enriches each expression with the raw SEO Rank API payload. Configure these keys in `settings.py` (or via environment variables):
+
+- `seorank_api_base_url`: Base endpoint (defaults to `https://seo-rank.my-addr.com/api2/moz+sr+fb`).
+- `seorank_api_key`: Required API key (`MWI_SEORANK_API_KEY` overrides the default).
+- `seorank_timeout`: Request timeout in seconds.
+- `seorank_request_delay`: Pause between calls to stay polite with the provider.
+
+By default the command only targets expressions with `http_status = 200` and `relevance ≥ 1`; pass `--http=all` or `--minrel=0` to broaden the selection.
+
+Without a valid API key the command exits early. Use `--force` to refresh entries that already contain data in `expression.seorank`.
+
+#### SerpAPI bootstrap (`land urlist`)
+
+The `land urlist` command queries Google via SerpAPI and pushes new URLs to a
+land. Configure the following values in `settings.py` or via environment
+variables:
+
+- `serpapi_api_key`: Required API key (`MWI_SERPAPI_API_KEY` overrides the default).
+- `serpapi_base_url`: Base endpoint (defaults to `https://serpapi.com/search`).
+- `serpapi_timeout`: HTTP timeout in seconds.
+
+Date filters (`--datestart`, `--dateend`, `--timestep`) are optional but must be
+provided as valid `YYYY-MM-DD` strings when used. The command sleeps between
+pages (`--sleep`) to avoid rate limits; set it to `0` for tests/mocks only.
+
+### Testing
+
+- `tests/test_cli.py`: CLI smoke tests.
+- `tests/test_core.py`, etc.: Unit tests for extraction, parsing, export.
+
+### Extending
+
+- Add export: implement `Export.write_<type>`, update controller.
+- Change language: pass `--lang` at land creation.
+- Add headers/proxy: edit `settings` or patch session logic.
+- Custom tags: use tag hierarchy, export flattens to paths.
+
+---
 
 # License
 
