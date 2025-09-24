@@ -1,5 +1,3 @@
-version: "3.9"
-
 # -----------------------------------------------------------------------------
 # MyWebIntelligence — Docker Compose
 # -----------------------------------------------------------------------------
@@ -50,9 +48,11 @@ services:
       - MYWI_DATA_DIR=/app/data
     volumes:
       # Mappage volume : HOST:CONTAINER
-      # - Gauche (HOST_DATA_DIR) : dossier sur votre machine (défaut ./data)
-      # - Droite (/app/data)     : dossier interne attendu par l’app
-      - ${HOST_DATA_DIR:-./data}:/app/data
+      # - source (HOST_DATA_DIR) : dossier sur votre machine (défaut ./data)
+      # - target (/app/data)     : dossier interne attendu par l’app
+      - type: bind
+        source: ${HOST_DATA_DIR:-./data}
+        target: /app/data
     tty: true
     stdin_open: true
     restart: unless-stopped
@@ -68,7 +68,9 @@ services:
       - MYWI_DATA_DIR=/app/data
     volumes:
       # Utilise le même dossier de données que le service principal
-      - ${HOST_DATA_DIR:-./data}:/app/data
+      - type: bind
+        source: ${HOST_DATA_DIR:-./data}
+        target: /app/data
     entrypoint: ["python", "install_playwright.py"]
     profiles: ["tools"]
 
@@ -80,6 +82,8 @@ services:
       - MYWI_DATA_DIR=/app/data
     volumes:
       # Runner éphémère pour exécuter une commande ponctuelle
-      - ${HOST_DATA_DIR:-./data}:/app/data
+      - type: bind
+        source: ${HOST_DATA_DIR:-./data}
+        target: /app/data
     entrypoint: ["bash", "-lc"]
     profiles: ["tools"]
