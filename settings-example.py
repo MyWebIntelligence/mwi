@@ -23,6 +23,8 @@ parallel_connections = 10  # Async HTTP concurrency for crawling
 
 user_agent = ""  # Optionally set a custom UA
 
+# Cut Domains
+
 heuristics = {
     "facebook.com": r"([a-z0-9\-_]+\.facebook\.com/(?!(?:permalink.php)|(?:notes))[a-zA-Z0-9\.\-_]+)/?\??",
     "twitter.com": r"([a-z0-9\-_]*\.?twitter\.com/(?!(?:hashtag)|(?:search)|(?:home)|(?:share))[a-zA-Z0-9\.\-_]+)",
@@ -48,25 +50,7 @@ media_extract_colors = True
 media_extract_exif = True
 media_n_dominant_colors = 5
 
-# OpenRouter relevance gate (disabled by default)
-openrouter_enabled = False
-openrouter_api_key = os.getenv("MWI_OPENROUTER_API_KEY", "")
-openrouter_model = os.getenv("MWI_OPENROUTER_MODEL", "deepseek/deepseek-chat-v3.1")
-# Exemples de modèles compatibles OpenRouter (mini/éco)
-# Renseignez `openrouter_model` avec l'un de ces slugs si vous activez la passerelle
-openrouter_model_examples = [
-    "openai/gpt-4o-mini",
-    "anthropic/claude-3-haiku",
-    "google/gemini-1.5-flash",
-    "meta-llama/llama-3.1-8b-instruct",
-    "mistralai/mistral-small-latest",
-    "qwen/qwen2.5-7b-instruct",
-    "cohere/command-r-mini",
-]
-openrouter_timeout = 15  # seconds
-openrouter_readable_min_chars = 140
-openrouter_readable_max_chars = 12000
-openrouter_max_calls_per_run = 500
+
 
 # SEO Rank enrichment (land seorank)
 seorank_api_base_url = os.getenv(
@@ -80,6 +64,9 @@ seorank_request_delay = 1.0  # polite sleep between API calls
 serpapi_api_key = os.getenv("MWI_SERPAPI_API_KEY", "")
 serpapi_base_url = "https://serpapi.com/search"
 serpapi_timeout = 15  # seconds
+
+
+# --- Embedding Settings ---
 
 # Embedding settings (bi-encoder)
 # Provider: one of 'fake', 'http', 'openai', 'mistral', 'gemini', 'huggingface', 'ollama'
