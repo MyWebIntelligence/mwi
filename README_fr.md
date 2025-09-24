@@ -161,74 +161,125 @@ Comportement :
 
 ## Utiliser Docker Compose (recommandé)
 
-1. Copier le fichier d’environnement et choisir le dossier de stockage :
+Docker Compose est la manière la plus simple d’exécuter MyWI : tout reste isolé dans un conteneur et vos données demeurent sur votre machine. Les étapes ci-dessous supposent que vous débutez avec Docker.
+
+### Prérequis
+- Installer [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Compose est inclus) et le lancer avant de poursuivre.
+
+### Étape 1 – Préparer les fichiers de configuration
+1. Copier `.env.example` vers `.env`.
    ```bash
    cp .env.example .env
    ```
-   Laisser `HOST_DATA_DIR=./data` ou définir un chemin absolu (ex. `/Users/vous/mywi_data`).
-2. Construire et lancer les services :
+   - Conserver `HOST_DATA_DIR=./data` pour stocker la base et les exports dans le dépôt, ou remplacer par un chemin absolu (ex. `HOST_DATA_DIR=/Users/vous/mywi_data` sous macOS/Linux ou `HOST_DATA_DIR=C:/Users/vous/mywi_data` sous Windows).
+2. Copier le fichier d’exemple des réglages.
    ```bash
-   docker compose up -d --build
+   cp settings-example.py settings.py
    ```
-3. Initialiser la base la première fois :
-   ```bash
-   docker compose exec mwi python mywi.py db setup
-   ```
-4. Exécuter la CLI depuis le conteneur :
-   ```bash
-   docker compose exec mwi python mywi.py land create --name="MonSujet" --desc="..." --lang=fr
-   docker compose exec mwi python mywi.py land addurl --land="MonSujet" --urls="https://example.org"
-   docker compose exec mwi python mywi.py land crawl --name="MonSujet" --limit=10
-   docker compose exec mwi python mywi.py land readable --name="MonSujet" --merge=smart_merge
-   docker compose exec mwi python mywi.py land export --name="MonSujet" --type=pagecsv
-   ```
+   - Ajouter vos clés API (SerpAPI, SEO Rank, OpenRouter, embeddings…) dans `settings.py`, ou bien les renseigner dans `.env` via des variables comme `MWI_SERPAPI_API_KEY=...` qui seront transmises automatiquement au conteneur.
 
-Emplacements :
-- Hôte : `${HOST_DATA_DIR}` (défaut : `./data`).
-- Conteneur : `/app/data` (déjà référencé par `settings.py`).
+### Étape 2 – Construire et démarrer les services
+```bash
+docker compose up -d --build
+```
+Le premier lancement télécharge les dépendances et peut durer plusieurs minutes. Pour les lancements suivants, `docker compose up -d` suffit.
 
-Extras optionnels :
+### Étape 3 – Initialiser la base de données (une seule fois)
+```bash
+docker compose exec mwi python mywi.py db setup
+```
+
+### Étape 4 – Lancer les commandes CLI
+Utiliser `docker compose exec mwi python mywi.py ...` pour chaque commande. Exemples :
+```bash
+docker compose exec mwi python mywi.py land create --name="MonSujet" --desc="…" --lang=fr
+docker compose exec mwi python mywi.py land addurl --land="MonSujet" --urls="https://example.org"
+docker compose exec mwi python mywi.py land crawl --name="MonSujet" --limit=10
+docker compose exec mwi python mywi.py land readable --name="MonSujet" --merge=smart_merge
+docker compose exec mwi python mywi.py land export --name="MonSujet" --type=pagecsv
+```
+
+### Étape 5 – Extras optionnels
 - Installer Playwright pour l’extraction dynamique :
   ```bash
   docker compose exec mwi python install_playwright.py
   ```
-- Construire avec les dépendances ML (FAISS + transformers) :
+- Inclure les dépendances ML (FAISS + transformers) si vous prévoyez d’utiliser les embeddings/NLI en local :
   ```bash
   MYWI_WITH_ML=1 docker compose build
+  docker compose up -d
   ```
 
-Arrêt / nettoyage :
+### Étape 6 – Arrêter ou réinitialiser l’environnement
 ```bash
-docker compose down        # arrêter
-```
-```bash
-docker compose down -v     # arrêter et supprimer les volumes (destructif)
+docker compose down          # arrêter le conteneur
+docker compose down -v       # arrêter et supprimer le volume Docker (DETRUIT la base)
 ```
 
----
+#### Où sont mes données ?
+- Sur la machine hôte : le dossier indiqué par `HOST_DATA_DIR` (défaut : `./data` dans le dépôt).
+- Dans le conteneur : `/app/data`. `settings.py` pointe déjà vers cet emplacement, aucune configuration supplémentaire n’est nécessaire.
 
 ## Utiliser Docker (manuel)
 
-1. Préparer un dossier pour les données persistantes (ex. `~/mywi_data`).
-2. Cloner le dépôt et se placer à la racine.
-3. Construire l’image :
-   ```bash
-   docker build -t mwi:latest .
-   ```
-4. Démarrer le conteneur en montant le dossier hôte vers `/app/data` :
-   ```bash
-   docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest
-   ```
-5. Ouvrir un shell dans le conteneur et initialiser la base :
-   ```bash
-   docker exec -it mwi bash
-   python mywi.py db setup
-   ```
-6. Exécuter ensuite les commandes `python mywi.py ...`. Pour utiliser un autre chemin interne, exporter `MYWI_DATA_DIR` avant de lancer le conteneur.
+Choisissez cette option si vous préférez saisir vous-même les commandes Docker plutôt que d’utiliser Docker Compose.
 
-L’image inclut Playwright + Chromium pour l’analyse média dynamique (JS, lazy-loading).
+### Prérequis
+- Installer [Docker Desktop](https://www.docker.com/products/docker-desktop/) ou Docker Engine et vérifier qu’il s’exécute.
 
----
+### Étape 1 – Cloner le dépôt
+```bash
+git clone https://github.com/MyWebIntelligence/MyWebIntelligencePython.git
+cd MyWebIntelligencePython
+```
+
+### Étape 2 – Préparer le fichier `settings.py`
+```bash
+cp settings-example.py settings.py
+```
+- Stocker vos clés API (SerpAPI, SEO Rank, OpenRouter, embeddings…) dans `settings.py` ou prévoir de les passer au conteneur via `-e MWI_SERPAPI_API_KEY=...`.
+- La valeur par défaut `data_location = "data"` correspondra au point de montage `/app/data` utilisé ci-dessous.
+
+### Étape 3 – Créer un dossier persistant sur l’hôte
+```bash
+mkdir -p ~/mywi_data
+```
+- Windows (PowerShell) : `New-Item -ItemType Directory -Path "C:/Users/vous/mywi_data"`
+
+### Étape 4 – Construire l’image Docker
+```bash
+docker build -t mwi:latest .
+```
+- Pour inclure les dépendances ML (FAISS + transformers), exécuter `MYWI_WITH_ML=1 docker build -t mwi:latest .`.
+
+### Étape 5 – Démarrer le conteneur
+Remplacer le chemin hôte par le dossier créé à l’étape précédente.
+```bash
+docker run -dit --name mwi -v /chemin/vers/vos/donnees:/app/data mwi:latest
+```
+- macOS/Linux : `docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest`
+- Windows : `docker run -dit --name mwi -v C:/Users/vous/mywi_data:/app/data mwi:latest`
+- Ajouter des variables d’environnement (`-e MWI_SERPAPI_API_KEY=...`) si vous ne souhaitez pas modifier `settings.py`.
+
+### Étape 6 – Initialiser la base (première fois uniquement)
+```bash
+docker exec -it mwi python mywi.py db setup
+```
+
+### Étape 7 – Utiliser la CLI depuis le conteneur
+```bash
+docker exec -it mwi python mywi.py land list
+```
+Exécuter ensuite toutes les commandes sous la forme `docker exec -it mwi python mywi.py ...`. Tapez `exit` pour quitter un shell ouvert avec `docker exec -it mwi bash`.
+
+### Gérer le conteneur
+```bash
+docker stop mwi         # arrêter le conteneur
+docker start mwi        # le relancer plus tard
+docker rm mwi           # supprimer le conteneur (les données restent sur l’hôte)
+```
+
+Vos données demeurent dans le dossier monté à l’étape 5. Relancer le conteneur avec la même option `-v` réutilise la base existante.
 
 ## Installation locale
 

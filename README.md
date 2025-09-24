@@ -198,178 +198,125 @@ You can install MyWI using Docker (recommended for ease of use) or by setting up
 
 ## Using Docker Compose (recommended)
 
-The simplest way to run MyWI is with Docker Compose. It keeps your database and exports in a folder you control, and gives you an interactive container for the CLI. This section is written for beginners.
+Docker Compose is the easiest way to run MyWI because it installs everything in an isolated container and keeps your data on your computer. The steps below assume no prior Docker knowledge.
 
-Prerequisites:
-* Docker Desktop (or Docker Engine) with Compose
+### Prerequisites
+- Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose) and start it before continuing.
 
-0) Optional — choose where to store data/exports
-- Copy `.env.example` to `.env`:
-  ```bash
-  cp .env.example .env
-  ```
-- Keep the default to store everything in `./data` inside the repo:
-  ```env
-  HOST_DATA_DIR=./data
-  ```
-- Or set an absolute path outside the repo:
-  - macOS/Linux: `HOST_DATA_DIR=/Users/you/mywi_data`
-  - Windows: `HOST_DATA_DIR=C:/Users/you/mywi_data`
+### Step 1 – Prepare the configuration files
+1. Copy `.env.example` to `.env`.
+   ```bash
+   cp .env.example .env
+   ```
+   - Keep the default `HOST_DATA_DIR=./data` to store the database and exports inside the repository, or replace it with an absolute path (for example `HOST_DATA_DIR=/Users/you/mywi_data` on macOS/Linux or `HOST_DATA_DIR=C:/Users/you/mywi_data` on Windows).
+2. Copy the sample settings file.
+   ```bash
+   cp settings-example.py settings.py
+   ```
+   - You can add API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) in `settings.py`. Alternatively, add them to `.env` as environment variables like `MWI_SERPAPI_API_KEY=...`; Docker Compose automatically passes them to the container.
 
-- Copy the sample settings and adjust credentials if needed (the file is ignored by git):
-  ```bash
-  cp settings-example.py settings.py
-  ```
-  - Put API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) directly in `settings.py` **or** expose them in `.env` using the `MWI_*` variables shown in `settings-example.py`.
-  - For Docker Compose, adding lines such as `MWI_SERPAPI_API_KEY=...` to `.env` overrides the defaults without modifying the file again.
-
-1) Build and start the container
+### Step 2 – Build and start the services
 ```bash
 docker compose up -d --build
 ```
+The first run downloads dependencies, so it can take a few minutes. Subsequent runs can use `docker compose up -d`.
 
-2) Initialize the database (first time only)
+### Step 3 – Initialize the database (first run only)
 ```bash
 docker compose exec mwi python mywi.py db setup
 ```
 
-3) Run the CLI (examples)
+### Step 4 – Run CLI commands
+Use `docker compose exec mwi python mywi.py ...` for every command. Examples:
 ```bash
-docker compose exec mwi python mywi.py land create --name="MyResearchTopic" --desc="…" --lang=fr
-docker compose exec mwi python mywi.py land addurl --land="MyResearchTopic" --urls="https://example.org"
-docker compose exec mwi python mywi.py land crawl --name="MyResearchTopic" --limit=10
-docker compose exec mwi python mywi.py land readable --name="MyResearchTopic" --merge=smart_merge
-docker compose exec mwi python mywi.py land export --name="MyResearchTopic" --type=pagecsv
+docker compose exec mwi python mywi.py land create --name="MyTopic" --desc="…" --lang=fr
+docker compose exec mwi python mywi.py land addurl --land="MyTopic" --urls="https://example.org"
+docker compose exec mwi python mywi.py land crawl --name="MyTopic" --limit=10
+docker compose exec mwi python mywi.py land readable --name="MyTopic" --merge=smart_merge
+docker compose exec mwi python mywi.py land export --name="MyTopic" --type=pagecsv
 ```
 
-Where are my files?
-- On your machine: `${HOST_DATA_DIR}` (default `./data` in the repo)
-- In the container: `/app/data`
-- `settings.py` already uses `data` (resolved to `/app/data`), so you don’t need to edit it.
-
-Optional:
-- Install Playwright browsers (for dynamic media extraction):
+### Step 5 – Optional extras
+- Install Playwright browsers for dynamic media extraction:
   ```bash
   docker compose exec mwi python install_playwright.py
   ```
-- Build with ML extras (FAISS + transformers for embeddings/NLI):
+- Build the image with machine-learning extras (FAISS + transformers) if you plan to use embeddings/NLI locally:
   ```bash
   MYWI_WITH_ML=1 docker compose build
-  # Then run as usual: docker compose up -d
+  docker compose up -d
   ```
 
-Stop/remove:
+### Step 6 – Stop or reset the environment
 ```bash
-docker compose down        # stop
-docker compose down -v     # stop and remove volumes (destructive)
+docker compose down          # stop the container
+docker compose down -v       # stop and delete the Docker volume (DESTROYS the database)
 ```
 
-Choosing the data location — common cases
-- Case A (default, simplest): leave `HOST_DATA_DIR=./data` in `.env`. Nothing else to do.
-- Case B (outside the repo): set an absolute path in `.env`, e.g.:
-  - macOS/Linux: `HOST_DATA_DIR=/Users/alice/mywi_data`
-  - Windows: `HOST_DATA_DIR=C:/Users/Alice/mywi_data`
-  Then run `docker compose up -d --build` and use the CLI as shown above.
+#### Where is my data?
+- On your computer: the folder defined by `HOST_DATA_DIR` (default `./data` in the repository).
+- Inside the container: `/app/data`. `settings.py` already points to this location, so no extra configuration is needed.
 
 ## Using Docker (manual)
 
-**Prerequisites:**
-*   Python 3.10+ (for understanding the project, not strictly for running Docker if image is pre-built)
-*   [Docker Desktop](https://www.docker.com/products/docker-desktop)
+Use this path if you prefer plain Docker commands instead of Docker Compose.
 
-**Steps:**
+### Prerequisites
+- Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine and make sure it is running.
 
-1.  **Create a Data Directory:**
-    On your host machine, create a directory to store the SQLite database file and other persistent data. This directory will be mounted into the Docker container.
-    ```bash
-    mkdir ~/mywi_data 
-    # Example: creates a directory named 'mywi_data' in your home folder
-    ```
-
-2.  **Clone the Project:**
-    ```bash
-    git clone https://github.com/MyWebIntelligence/mwi.git
-    cd mwi
-    ```
-
-3.  **Prepare `settings.py`:**
-    Copy the template and provide your secrets. The resulting file stays untracked.
-    ```bash
-    cp settings-example.py settings.py
-    ```
-    - Fill in API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) directly in `settings.py` **or** plan to pass them as environment variables like `MWI_SERPAPI_API_KEY` when running the container.
-    - You can mount a host-side version of `settings.py` into the container if you prefer editing it outside the image.
-
-4.  **Configure the data location (optional):**
-    For beginners, the simplest approach is to mount your host folder at `/app/data`. The app’s default path is `data` → it resolves to `/app/data`. No code changes are required.
-    - Case 1 (recommended): mount to `/app/data` (no changes)
-      - macOS/Linux :
-        ```bash
-        mkdir -p ~/mywi_data
-        docker run -dit --name mwi \
-          -v ~/mywi_data:/app/data \
-          mwi:latest
-        ```
-      - Windows:
-        ```powershell
-        docker run -dit --name mwi `
-          -v C:/Users/you/mywi_data:/app/data `
-          mwi:latest
-        ```
-    - Case 2 (advanced): use a different internal path and tell the app
-      ```bash
-      docker run -dit --name mwi \
-        -e MYWI_DATA_DIR=/data \
-        -v /absolute/host/path:/data \
-        mwi:latest
-      ```
-
-5.  **Build the Docker Image:**
-    ```bash
-    docker build -t mwi:latest .
-    # Using mwi:1.2 as per original, but latest is also common
-    # docker build -t mwi:1.2 . 
-    ```
-
-6.  **Run the Docker Container:**
-    Replace `/path/to/your/host/data` with your actual folder. Recommended mapping is to `/app/data`:
-    ```bash
-    docker run -dit --name mwi -v /path/to/your/host/data:/app/data mwi:latest
-    # macOS/Linux example:
-    # docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest
-    # Windows example:
-    # docker run -dit --name mwi -v C:/Users/you/mywi_data:/app/data mwi:latest
-    ```
-    *   `-d`: Run in detached mode
-    *   `-i`: Keep STDIN open even if not attached
-    *   `-t`: Allocate a pseudo-TTY
-    *   `--name mwi`: Assign a name to the container
-    *   `-v /path/to/your/host/data:/app/data`: Mount your host data directory to `/app/data` inside the container (matches app default).
-
-7.  **Access the Container Shell:**
-    ```bash
-    docker exec -it mwi bash
-    ```
-
-8.  **Setup Database (inside the container):**
-    If this is the first time, or if the database doesn't exist in your mounted volume:
-    ```bash
-    # Inside the Docker container
-    python mywi.py db setup
-    ```
-    You are now ready to use MyWI commands as described in the [Usage](#usage) section.
-
-**Note on Dynamic Media Extraction:**
-The Docker image includes Playwright and Chromium browser for enhanced media detection. This enables:
-- Detection of JavaScript-generated media content
-- Extraction of lazy-loaded images
-- Support for dynamic content that requires browser rendering
-
-To test the dynamic media extraction functionality:
+### Step 1 – Clone the project
 ```bash
-# Inside the Docker container
-python test_dynamic_media.py
+git clone https://github.com/MyWebIntelligence/mwi.git
+cd mwi
 ```
+
+### Step 2 – Prepare the settings file
+```bash
+cp settings-example.py settings.py
+```
+- Store your API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) in `settings.py` or plan to provide them as environment variables when starting the container (for example `-e MWI_SERPAPI_API_KEY=...`).
+- The default `data_location = "data"` already matches the mount point we will use (`/app/data`).
+
+### Step 3 – Create a folder for persistent data
+```bash
+mkdir -p ~/mywi_data
+```
+- Windows (PowerShell): `New-Item -ItemType Directory -Path "C:/Users/you/mywi_data"`
+
+### Step 4 – Build the Docker image
+```bash
+docker build -t mwi:latest .
+```
+- To include ML dependencies (FAISS + transformers) run `MYWI_WITH_ML=1 docker build -t mwi:latest .` instead.
+
+### Step 5 – Start the container
+Replace the host path with the folder you created in Step 3.
+```bash
+docker run -dit --name mwi -v /path/to/your/data:/app/data mwi:latest
+```
+- macOS/Linux example: `docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest`
+- Windows example: `docker run -dit --name mwi -v C:/Users/you/mywi_data:/app/data mwi:latest`
+- Add `-e MWI_SERPAPI_API_KEY=...` (and similar) if you prefer environment variables to editing `settings.py`.
+
+### Step 6 – Initialize the database (first run only)
+```bash
+docker exec -it mwi python mywi.py db setup
+```
+
+### Step 7 – Use the CLI from the container
+```bash
+docker exec -it mwi python mywi.py land list
+```
+Run the rest of the commands the same way (`docker exec -it mwi python mywi.py ...`). Type `exit` to leave the container shell if you opened one with `docker exec -it mwi bash`.
+
+### Manage the container
+```bash
+docker stop mwi         # stop the container
+docker start mwi        # start it again later
+docker rm mwi           # remove the container (keeps your data because it lives on the host)
+```
+
+Your data stays in the host folder you mounted in Step 5. Re-running the container with the same `-v` option reuses the existing database.
 
 ## Local Development Setup
 

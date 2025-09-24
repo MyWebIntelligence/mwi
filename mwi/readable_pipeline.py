@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
+import trafilatura # type: ignore
+
 from . import model
 from .core import get_land_dictionary
 
@@ -70,7 +72,8 @@ class MercuryReadablePipeline:
             'processed': 0,
             'updated': 0,
             'errors': 0,
-            'skipped': 0
+            'skipped': 0,
+            'fallback_used': 0
         }
 
     async def process_land(self,
@@ -208,7 +211,7 @@ class MercuryReadablePipeline:
                         await asyncio.sleep(2 ** attempt)  # Exponential backoff
                         continue
                     result.error = error_msg
-                    return result
+                    break
 
                 # Parse JSON response
                 data = json.loads(stdout.decode())
@@ -236,13 +239,88 @@ class MercuryReadablePipeline:
 
             except json.JSONDecodeError as e:
                 result.error = f"Invalid JSON response: {e}"
-                return result
+                break
             except Exception as e:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
                 result.error = str(e)
-                return result
+                break
+
+        if result.error and self._should_try_trafilatura_fallback(result.error):
+            fallback_result = await self._fallback_with_trafilatura(url)
+            if fallback_result:
+                self.logger.info(f"Trafilatura fallback succeeded for {url}")
+                self.stats['fallback_used'] += 1
+                return fallback_result
+            self.logger.warning(f"Trafilatura fallback failed for {url}: {result.error}")
+
+        return result
+
+    def _should_try_trafilatura_fallback(self, error_message: Optional[str]) -> bool:
+        """Détermine si l'on doit tenter un fallback trafilatura."""
+        if not error_message:
+            return False
+        network_markers = (
+            'ECONNREFUSED',
+            'ECONNRESET',
+            'ETIMEDOUT',
+            'EHOSTUNREACH',
+            'ENOTFOUND',
+            'EAI_AGAIN',
+            'connect ETIMEDOUT',
+        )
+        return any(marker in error_message for marker in network_markers)
+
+    async def _fallback_with_trafilatura(self, url: str) -> Optional[MercuryResult]:
+        """Fallback vers trafilatura lorsque Mercury ne peut pas joindre la ressource."""
+        try:
+            downloaded = await asyncio.to_thread(trafilatura.fetch_url, url)
+        except Exception as e:
+            self.logger.debug(f"Trafilatura fetch failed for {url}: {e}")
+            return None
+
+        if not downloaded:
+            return None
+
+        try:
+            markdown = trafilatura.extract(
+                downloaded,
+                include_links=True,
+                include_comments=False,
+                include_images=True,
+                output_format='markdown'
+            )
+        except Exception as e:
+            self.logger.debug(f"Trafilatura extract failed for {url}: {e}")
+            return None
+
+        if not markdown:
+            return None
+
+        metadata = None
+        try:
+            metadata = trafilatura.extract_metadata(downloaded)
+        except Exception as e:
+            self.logger.debug(f"Trafilatura metadata extraction failed for {url}: {e}")
+
+        result = MercuryResult(
+            title=(metadata.get('title') if metadata else None),
+            content=markdown,
+            markdown=markdown,
+            lead_image_url=(metadata.get('image') if metadata else None),
+            date_published=(metadata.get('date') if metadata else None),
+            author=(metadata.get('author') if metadata else None),
+            excerpt=(metadata.get('description') if metadata else None),
+            domain=(metadata.get('sitename') if metadata else None),
+            word_count=len(markdown.split()),
+            error=None,
+            extraction_timestamp=datetime.now(),
+            raw_response={'source': 'trafilatura'}
+        )
+
+        if metadata and metadata.get('lang'):
+            result.direction = metadata.get('lang')
 
         return result
 
@@ -559,6 +637,7 @@ class MercuryReadablePipeline:
             'updated': self.stats['updated'],
             'errors': self.stats['errors'],
             'skipped': self.stats['skipped'],
+            'fallbacks': self.stats['fallback_used'],
             'success_rate': (self.stats['updated'] / self.stats['processed'] * 100)
                            if self.stats['processed'] > 0 else 0
         }
@@ -592,6 +671,8 @@ async def run_readable_pipeline(land: model.Land,
         stats = await pipeline.process_land(land, limit, depth)
         print(f"✅ Completed processing {stats['processed']} expressions")
         print(f"✔️ Updated: {stats['updated']}, Errors: {stats['errors']}, Skipped: {stats['skipped']}")
+        if stats.get('fallbacks'):
+            print(f"🛟 Trafilatura fallbacks used: {stats['fallbacks']}")
         return stats['processed'], stats['errors']
     except Exception as e:
         print(f"❌ Pipeline failed: {str(e)}")
