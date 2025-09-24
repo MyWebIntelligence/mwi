@@ -143,13 +143,6 @@ docker run -dit --name mwi -v /path/to/your/data:/app/data mwi:latest
 ```bash
 docker exec -it mwi python mywi.py db setup
 ```
-
-### Step 7 – Use the CLI from the container
-```bash
-docker exec -it mwi python mywi.py land list
-```
-Run the rest of the commands the same way (`docker exec -it mwi python mywi.py ...`). Type `exit` to leave the container shell if you opened one with `docker exec -it mwi bash`.
-
 ### Manage the container
 ```bash
 docker stop mwi         # stop the container
@@ -239,8 +232,28 @@ You are now ready to use MyWI commands as described in the [Usage](#usage) secti
 
 *   Commands are run using `python mywi.py ...`.
 *   If using Docker, first execute `docker exec -it mwi bash` to enter the container. The prompt might be `root@<container_id>:/app#` or similar.
+
+```bash
+# S’assurer que le service tourne
+docker compose up -d
+# Entrer dans le conteneur
+docker compose exec mwi bash
+#ou
+docker exec -it mwi bash
+#  >>> (prompt ≈ root@<container_id>:/app#)
+
+# Exécuter ensuite n’importe quelle commande applicative
+```
+
 *   If using a local development setup, ensure your virtual environment is activated (e.g., `(venv)` prefix in your prompt).
 *   Arguments like `LAND_NAME` or `TERMS` are placeholders; replace them with your actual values.
+
+```bash
+source .venv/bin/activate  # ou ton venv équivalent qui n'est pas nécessairement '.venv'
+
+# Exécuter ensuite n’importe quelle commande applicative
+
+```
 
 ## Land Management
 
