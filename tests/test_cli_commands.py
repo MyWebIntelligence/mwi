@@ -353,6 +353,53 @@ def test_land_urlist_duckduckgo_date_filters(fresh_db, monkeypatch):
     assert captured.get("dateend") == "2024-01-31"
 
 
+def test_fetch_serpapi_url_list_duckduckgo_month_windows(monkeypatch):
+    from mwi import core as core_module
+
+    captured_params = []
+
+    class DummyResponse:
+        def __init__(self, params):
+            self.status_code = 200
+            self.text = ''
+            self._params = params
+
+        def json(self):
+            index = len(captured_params)
+            return {
+                'organic_results': [
+                    {
+                        'link': f'https://example.com/{index}',
+                        'title': f'Result {index}',
+                        'position': index + 1,
+                        'date': None,
+                    }
+                ],
+                'serpapi_pagination': {},
+            }
+
+    def fake_get(url, params, timeout):
+        captured_params.append(dict(params))
+        return DummyResponse(params)
+
+    monkeypatch.setattr(core_module.requests, 'get', fake_get, raising=True)
+
+    results = core_module.fetch_serpapi_url_list(
+        api_key='TEST',
+        query='duckduckgo windows',
+        engine='duckduckgo',
+        lang='fr',
+        datestart='2024-01-01',
+        dateend='2024-02-28',
+        timestep='month',
+        sleep_seconds=0.0,
+    )
+
+    assert len(results) == 2
+    assert captured_params[0]['df'] == '2024-01-01..2024-01-31'
+    assert captured_params[1]['df'] == '2024-02-01..2024-02-28'
+
+
 def test_domain_crawl_cli(fresh_db, monkeypatch):
     controller = fresh_db["controller"]
     core = fresh_db["core"]

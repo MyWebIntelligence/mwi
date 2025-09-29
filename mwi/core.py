@@ -279,19 +279,19 @@ def fetch_serpapi_url_list(
     if (datestart or dateend) and engine not in date_capable_engines:
         raise SerpApiError('Date filtering is only supported with the google or duckduckgo engines')
 
-    duckduckgo_df: Optional[str] = None
-    if engine == 'duckduckgo' and datestart and dateend:
-        start_date_obj = _parse_serpapi_date(datestart)
-        end_date_obj = _parse_serpapi_date(dateend)
-        if start_date_obj > end_date_obj:
+    normalized_start: Optional[date] = None
+    normalized_end: Optional[date] = None
+    if datestart and dateend:
+        normalized_start = _parse_serpapi_date(datestart)
+        normalized_end = _parse_serpapi_date(dateend)
+        if normalized_start > normalized_end:
             raise SerpApiError('datestart must be earlier than or equal to dateend')
-        duckduckgo_df = f"{start_date_obj.isoformat()}..{end_date_obj.isoformat()}"
 
     date_windows: List[Tuple[Optional[date], Optional[date]]] = []
-    if engine == 'google':
+    if engine in date_capable_engines and normalized_start and normalized_end:
         date_windows = list(_build_serpapi_windows(datestart, dateend, timestep))
     if not date_windows:
-        date_windows = [(None, None)]  # Always run at least once without a date filter.
+        date_windows = [(normalized_start, normalized_end)]  # Always run at least once.
 
     aggregated: List[Dict[str, Optional[Union[str, int]]]] = []
 
@@ -310,7 +310,14 @@ def fetch_serpapi_url_list(
                 'engine': engine,
                 'q': normalized_query,
             }
-            params.update(_build_serpapi_params(engine, lang, start_index, page_size, duckduckgo_df))
+            params.update(_build_serpapi_params(
+                engine,
+                lang,
+                start_index,
+                page_size,
+                window_start=window_start,
+                window_end=window_end
+            ))
 
             if engine == 'google' and window_start and window_end:
                 # Google accepts the date constraint through the tbs parameter.
@@ -377,7 +384,8 @@ def _build_serpapi_params(
     lang: str,
     start_index: int,
     page_size: int,
-    duckduckgo_df: Optional[str] = None
+    window_start: Optional[date] = None,
+    window_end: Optional[date] = None
 ) -> Dict[str, Union[str, int]]:
     normalized_lang = (lang or 'fr').strip().lower() or 'fr'
 
@@ -405,8 +413,8 @@ def _build_serpapi_params(
             'start': start_index,
             'm': page_size,
         }
-        if duckduckgo_df:
-            params['df'] = duckduckgo_df
+        if window_start and window_end:
+            params['df'] = f"{window_start.isoformat()}..{window_end.isoformat()}"
         return params
 
     return {}
