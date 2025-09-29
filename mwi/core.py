@@ -340,7 +340,12 @@ def fetch_serpapi_url_list(
                 raise SerpApiError('Invalid JSON payload returned by SerpAPI') from exc
 
             if 'error' in payload:
-                raise SerpApiError(f"SerpAPI error: {payload['error']}")
+                message = str(payload.get('error', '')).strip()
+                lowered = message.lower()
+                if engine == 'duckduckgo' and "hasn't returned any results" in lowered:
+                    # DuckDuckGo uses an error payload when no results exist for the window.
+                    break
+                raise SerpApiError(f"SerpAPI error: {message}")
 
             organic_results = payload.get('organic_results') or []
             if not organic_results:

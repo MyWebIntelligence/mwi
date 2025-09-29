@@ -400,6 +400,47 @@ def test_fetch_serpapi_url_list_duckduckgo_month_windows(monkeypatch):
     assert captured_params[1]['df'] == '2024-02-01..2024-02-28'
 
 
+def test_fetch_serpapi_url_list_duckduckgo_handles_empty(monkeypatch):
+    from mwi import core as core_module
+
+    class DummyResponse:
+        def __init__(self, payload):
+            self.status_code = 200
+            self.text = ''
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    responses = [
+        DummyResponse({'error': "DuckDuckGo hasn't returned any results for this query."}),
+        DummyResponse({
+            'organic_results': [
+                {'link': 'https://example.com/x', 'title': 'X', 'position': 1, 'date': None}
+            ],
+            'serpapi_pagination': {},
+        }),
+    ]
+
+    def fake_get(url, params, timeout):
+        return responses.pop(0)
+
+    monkeypatch.setattr(core_module.requests, 'get', fake_get, raising=True)
+
+    results = core_module.fetch_serpapi_url_list(
+        api_key='TEST',
+        query='duckduckgo error',
+        engine='duckduckgo',
+        lang='fr',
+        datestart='2024-03-01',
+        dateend='2024-03-31',
+        timestep='month',
+        sleep_seconds=0.0,
+    )
+
+    assert len(results) == 1
+
+
 def test_domain_crawl_cli(fresh_db, monkeypatch):
     controller = fresh_db["controller"]
     core = fresh_db["core"]
