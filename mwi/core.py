@@ -11,7 +11,7 @@ from argparse import Namespace
 from datetime import date, datetime, timedelta
 from os import path
 from typing import Callable, Dict, List, Optional, Tuple, Union
-from urllib.parse import urlparse, urljoin, quote
+from urllib.parse import urlparse, urljoin, quote, parse_qs
 
 import aiohttp # type: ignore
 import nltk # type: ignore
@@ -361,11 +361,48 @@ def fetch_serpapi_url_list(
                 })
                 window_count += 1
 
-            start_index += page_size
+            serp_pagination = payload.get('serpapi_pagination') or {}
+            next_link = serp_pagination.get('next_link') or serp_pagination.get('next')
+            has_next_page = bool(next_link)
 
-            has_next_page = bool(payload.get('serpapi_pagination', {}).get('next'))
-            if not has_next_page and len(organic_results) < page_size:
+            if not has_next_page:
                 break
+
+            next_offset_raw = serp_pagination.get('next_offset')
+            next_index: Optional[int] = None
+            if next_offset_raw is not None:
+                try:
+                    next_index = int(next_offset_raw)
+                except (TypeError, ValueError):
+                    next_index = None
+
+            if next_index is None and isinstance(next_link, str):
+                try:
+                    parsed = urlparse(next_link)
+                    query_params = parse_qs(parsed.query)
+                except Exception:  # pragma: no cover - defensive
+                    query_params = {}
+
+                for key in ('start', 'first', 'offset'):
+                    values = query_params.get(key)
+                    if not values:
+                        continue
+                    try:
+                        candidate = int(values[0])
+                    except (TypeError, ValueError):
+                        continue
+                    if candidate > start_index:
+                        next_index = candidate
+                        break
+
+            if next_index is not None and next_index > start_index:
+                start_index = next_index
+                continue
+
+            increment = len(organic_results)
+            if increment <= 0:
+                break
+            start_index += increment
 
             # Light jitter mirrors the original R helper and reduces rate-limit risks.
             effective_sleep = max(0.0, float(sleep_seconds)) * random.uniform(jitter_floor, jitter_ceil)

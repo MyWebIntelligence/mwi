@@ -453,6 +453,65 @@ def test_fetch_serpapi_url_list_duckduckgo_handles_empty(monkeypatch):
     assert captured_params[1]['df'] == '2024-04-01..2024-04-30'
 
 
+def test_fetch_serpapi_url_list_google_paginates(monkeypatch):
+    from mwi import core as core_module
+
+    def build_results(count: int):
+        return [
+            {
+                'link': f'https://example.com/google/{idx}',
+                'title': f'Result {idx}',
+                'position': idx + 1,
+                'date': None,
+            }
+            for idx in range(count)
+        ]
+
+    class DummyResponse:
+        def __init__(self, payload):
+            self.status_code = 200
+            self.text = ''
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    captured_params = []
+    responses = [
+        DummyResponse({
+            'organic_results': build_results(20),
+            'serpapi_pagination': {
+                'next': 'https://serpapi.com/search.json?engine=google&start=20',
+            },
+        }),
+        DummyResponse({
+            'organic_results': build_results(5),
+            'serpapi_pagination': {},
+        }),
+    ]
+
+    def fake_get(url, params, timeout):
+        captured_params.append(dict(params))
+        return responses.pop(0)
+
+    monkeypatch.setattr(core_module.requests, 'get', fake_get, raising=True)
+
+    results = core_module.fetch_serpapi_url_list(
+        api_key='TEST',
+        query='google pagination',
+        engine='google',
+        lang='fr',
+        datestart='2024-01-01',
+        dateend='2024-01-31',
+        timestep='month',
+        sleep_seconds=0.0,
+    )
+
+    assert len(results) == 25
+    assert captured_params[0]['start'] == 0
+    assert captured_params[1]['start'] == 20
+
+
 def test_domain_crawl_cli(fresh_db, monkeypatch):
     controller = fresh_db["controller"]
     core = fresh_db["core"]
