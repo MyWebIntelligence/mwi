@@ -262,6 +262,97 @@ def test_land_urlist_cli(fresh_db, monkeypatch):
     assert created.title == "New title"
 
 
+def test_land_urlist_engine_option(fresh_db, monkeypatch):
+    controller = fresh_db["controller"]
+    core = fresh_db["core"]
+
+    name = rand_name("land")
+    assert controller.LandController.create(core.Namespace(name=name, desc="d", lang=["fr"])) == 1
+
+    monkeypatch.setattr(controller.settings, "serpapi_api_key", "TEST", raising=False)
+    monkeypatch.setattr(core.settings, "serpapi_api_key", "TEST", raising=False)
+
+    captured = {}
+
+    def fake_fetch(**kwargs):
+        captured["engine"] = kwargs.get("engine")
+        return []
+
+    monkeypatch.setattr(controller.core, "fetch_serpapi_url_list", fake_fetch, raising=True)
+    monkeypatch.setattr(core, "fetch_serpapi_url_list", fake_fetch, raising=True)
+
+    ret = controller.LandController.urlist(core.Namespace(
+        name=name,
+        query="bing test",
+        lang=["fr"],
+        engine="bing",
+        datestart=None,
+        dateend=None,
+        timestep="week",
+        sleep=0.0,
+    ))
+    assert ret == 1
+    assert captured["engine"] == "bing"
+
+
+def test_land_urlist_invalid_engine(fresh_db, monkeypatch):
+    controller = fresh_db["controller"]
+    core = fresh_db["core"]
+
+    name = rand_name("land")
+    assert controller.LandController.create(core.Namespace(name=name, desc="d", lang=["fr"])) == 1
+
+    monkeypatch.setattr(controller.settings, "serpapi_api_key", "TEST", raising=False)
+    monkeypatch.setattr(core.settings, "serpapi_api_key", "TEST", raising=False)
+
+    ret = controller.LandController.urlist(core.Namespace(
+        name=name,
+        query="test",
+        lang=["fr"],
+        engine="altavista",
+        datestart=None,
+        dateend=None,
+        timestep="week",
+        sleep=0.0,
+    ))
+    assert ret == 0
+
+
+def test_land_urlist_duckduckgo_date_filters(fresh_db, monkeypatch):
+    controller = fresh_db["controller"]
+    core = fresh_db["core"]
+
+    name = rand_name("land")
+    assert controller.LandController.create(core.Namespace(name=name, desc="d", lang=["fr"])) == 1
+
+    monkeypatch.setattr(controller.settings, "serpapi_api_key", "TEST", raising=False)
+    monkeypatch.setattr(core.settings, "serpapi_api_key", "TEST", raising=False)
+
+    captured = {}
+
+    def fake_fetch(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(controller.core, "fetch_serpapi_url_list", fake_fetch, raising=True)
+    monkeypatch.setattr(core, "fetch_serpapi_url_list", fake_fetch, raising=True)
+
+    ret = controller.LandController.urlist(core.Namespace(
+        name=name,
+        query="ddg test",
+        lang=["fr"],
+        engine="duckduckgo",
+        datestart="2024-01-01",
+        dateend="2024-01-31",
+        timestep="week",
+        sleep=0.0,
+    ))
+    assert ret == 1
+    assert captured.get("engine") == "duckduckgo"
+    assert captured.get("datestart") == "2024-01-01"
+    assert captured.get("dateend") == "2024-01-31"
+
+
 def test_domain_crawl_cli(fresh_db, monkeypatch):
     controller = fresh_db["controller"]
     core = fresh_db["core"]

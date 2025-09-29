@@ -1172,8 +1172,9 @@ Without a valid API key the command exits early. Use `--force` to refresh entrie
 
 #### SerpAPI bootstrap (`land urlist`)
 
-The `land urlist` command queries Google via SerpAPI and pushes new URLs to a
-land. Configure the following values in `settings.py` or via environment
+The `land urlist` command queries a SerpAPI search engine (Google by default;
+override with `--engine=bing|duckduckgo`) and pushes new URLs to a land.
+Configure the following values in `settings.py` or via environment
 variables:
 
 - `serpapi_api_key`: Required API key (`MWI_SERPAPI_API_KEY` overrides the default).
@@ -1181,7 +1182,8 @@ variables:
 - `serpapi_timeout`: HTTP timeout in seconds.
 
 Date filters (`--datestart`, `--dateend`, `--timestep`) are optional but must be
-provided as valid `YYYY-MM-DD` strings when used. The command sleeps between
+provided as valid `YYYY-MM-DD` strings when used, and they require
+`--engine=google` or `--engine=duckduckgo`. The command sleeps between
 pages (`--sleep`) to avoid rate limits; set it to `0` for tests/mocks only.
 When a date range is provided (or when you add `--progress`), the CLI prints one
 line per window indicating the covered dates and how many URLs SerpAPI returned.

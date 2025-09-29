@@ -104,6 +104,12 @@ def command_input():
                         type=str,
                         help='Search query to fetch URLs from SerpAPI',
                         nargs='?')
+    parser.add_argument('--engine',
+                        type=str,
+                        help='Search engine for urlist (google|bing|duckduckgo)',
+                        default='google',
+                        choices=['google', 'bing', 'duckduckgo'],
+                        nargs='?')
     parser.add_argument('--datestart',
                         type=str,
                         help='Start date (YYYY-MM-DD) for SerpAPI urlist filtering',

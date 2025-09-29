@@ -453,6 +453,12 @@ class LandController:
         # CLI stores languages as a list; keep the first entry for the request.
         lang_list = getattr(args, 'lang', ['fr'])
         lang = lang_list[0] if isinstance(lang_list, list) and lang_list else 'fr'
+        engine = (getattr(args, 'engine', 'google') or 'google').lower()
+        allowed_engines = {'google', 'bing', 'duckduckgo'}
+        if engine not in allowed_engines:
+            print(f'[urlist] Unsupported engine "{engine}" — choose google, bing or duckduckgo')
+            return 0
+
         datestart = getattr(args, 'datestart', None)
         dateend = getattr(args, 'dateend', None)
         timestep = getattr(args, 'timestep', 'week') or 'week'
@@ -460,6 +466,10 @@ class LandController:
 
         progress_requested = bool(getattr(args, 'progress', False))
         has_date_range = bool(datestart and dateend)
+        date_capable_engines = {'google', 'duckduckgo'}
+        if engine not in date_capable_engines and has_date_range:
+            print('[urlist] datestart/dateend filters are only supported with --engine=google or --engine=duckduckgo')
+            return 0
         want_progress = progress_requested or has_date_range
 
         progress_callback = None
@@ -477,6 +487,7 @@ class LandController:
             serp_results = core.fetch_serpapi_url_list(
                 api_key=api_key,
                 query=args.query,
+                engine=engine,
                 lang=lang,
                 datestart=datestart,
                 dateend=dateend,

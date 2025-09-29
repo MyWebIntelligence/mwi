@@ -154,8 +154,9 @@ Comportement :
 
 #### Bootstrap SerpAPI (`land urlist`)
 
-- `python mywi.py land urlist --name=LAND --query="..." [--datestart AAAA-MM-JJ --dateend AAAA-MM-JJ --timestep week]`
+- `python mywi.py land urlist --name=LAND --query="..." [--engine=bing|duckduckgo] [--datestart AAAA-MM-JJ --dateend AAAA-MM-JJ --timestep week]`
 - Config : `serpapi_api_key`, `serpapi_base_url`, `serpapi_timeout`, `--sleep` (secondes entre pages).
+- Les filtres de dates (`--datestart`, `--dateend`, `--timestep`) ne sont compatibles qu’avec `--engine=google` ou `--engine=duckduckgo`.
 
 ---
 

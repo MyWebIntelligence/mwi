@@ -224,6 +224,7 @@ class SerpApiError(Exception):
 def fetch_serpapi_url_list(
     api_key: str,
     query: str,
+    engine: str = 'google',
     lang: str = 'fr',
     datestart: Optional[str] = None,
     dateend: Optional[str] = None,
@@ -231,16 +232,17 @@ def fetch_serpapi_url_list(
     sleep_seconds: float = 1.0,
     progress_hook: Optional[Callable[[Optional[date], Optional[date], int], None]] = None
 ) -> List[Dict[str, Optional[Union[str, int]]]]:
-    """Query SerpAPI for Google organic results and return URL metadata.
+    """Query SerpAPI for organic results and return URL metadata.
 
     The function mirrors the behaviour of the original R helper: it optionally
-    walks a date range in fixed windows, paginates through Google result pages,
+    walks a date range in fixed windows, paginates through search result pages,
     and collects the ``organic_results`` payload.
 
     Args:
         api_key: SerpAPI secret key (required).
         query: Search query sent to SerpAPI.
-        lang: Language code used for Google ``gl/hl`` parameters.
+        engine: SerpAPI engine used to fetch results (``google|bing|duckduckgo``).
+        lang: Language code that maps to the engine-specific locale parameters.
         datestart: Optional lower bound (``YYYY-MM-DD``) for the search window.
         dateend: Optional upper bound (``YYYY-MM-DD``) for the search window.
         timestep: Window size when iterating between ``datestart`` and
@@ -262,13 +264,32 @@ def fetch_serpapi_url_list(
     if not normalized_query:
         raise SerpApiError('Query must be a non-empty string')
 
-    lang = (lang or 'fr').strip() or 'fr'
+    engine = (engine or 'google').strip().lower() or 'google'
+    allowed_engines = {'google', 'bing', 'duckduckgo'}
+    if engine not in allowed_engines:
+        raise SerpApiError(f'Unsupported SerpAPI engine "{engine}"')
+
+    lang = (lang or 'fr').strip().lower() or 'fr'
     timestep = (timestep or 'week').strip().lower() or 'week'
 
     if bool(datestart) ^ bool(dateend):
         raise SerpApiError('Both datestart and dateend must be provided together')
 
-    date_windows = list(_build_serpapi_windows(datestart, dateend, timestep))
+    date_capable_engines = {'google', 'duckduckgo'}
+    if (datestart or dateend) and engine not in date_capable_engines:
+        raise SerpApiError('Date filtering is only supported with the google or duckduckgo engines')
+
+    duckduckgo_df: Optional[str] = None
+    if engine == 'duckduckgo' and datestart and dateend:
+        start_date_obj = _parse_serpapi_date(datestart)
+        end_date_obj = _parse_serpapi_date(dateend)
+        if start_date_obj > end_date_obj:
+            raise SerpApiError('datestart must be earlier than or equal to dateend')
+        duckduckgo_df = f"{start_date_obj.isoformat()}..{end_date_obj.isoformat()}"
+
+    date_windows: List[Tuple[Optional[date], Optional[date]]] = []
+    if engine == 'google':
+        date_windows = list(_build_serpapi_windows(datestart, dateend, timestep))
     if not date_windows:
         date_windows = [(None, None)]  # Always run at least once without a date filter.
 
@@ -277,27 +298,21 @@ def fetch_serpapi_url_list(
     base_url = getattr(settings, 'serpapi_base_url', 'https://serpapi.com/search')
     timeout = getattr(settings, 'serpapi_timeout', 15)
     jitter_floor, jitter_ceil = 0.8, 1.2
-    page_size = 100
+    page_size = _serpapi_page_size(engine)
 
     for window_start, window_end in date_windows:
         # Pagination resets for every date window so we can cover the full range.
         start_index = 0
         window_count = 0
         while True:
-            params = {
+            params: Dict[str, Union[str, int]] = {
                 'api_key': api_key,
-                'engine': 'google',
+                'engine': engine,
                 'q': normalized_query,
-                'google_domain': _serpapi_google_domain(lang),
-                'gl': lang,
-                'hl': lang,
-                'lr': f'lang_{lang}',
-                'safe': 'off',
-                'num': page_size,
-                'start': start_index,
             }
+            params.update(_build_serpapi_params(engine, lang, start_index, page_size, duckduckgo_df))
 
-            if window_start and window_end:
+            if engine == 'google' and window_start and window_end:
                 # Google accepts the date constraint through the tbs parameter.
                 params['tbs'] = _build_serpapi_tbs(window_start, window_end)
 
@@ -349,6 +364,52 @@ def fetch_serpapi_url_list(
             progress_hook(window_start, window_end, window_count)
 
     return aggregated
+
+
+def _serpapi_page_size(engine: str) -> int:
+    if engine == 'google':
+        return 100
+    return 50
+
+
+def _build_serpapi_params(
+    engine: str,
+    lang: str,
+    start_index: int,
+    page_size: int,
+    duckduckgo_df: Optional[str] = None
+) -> Dict[str, Union[str, int]]:
+    normalized_lang = (lang or 'fr').strip().lower() or 'fr'
+
+    if engine == 'google':
+        return {
+            'google_domain': _serpapi_google_domain(normalized_lang),
+            'gl': normalized_lang,
+            'hl': normalized_lang,
+            'lr': f'lang_{normalized_lang}',
+            'safe': 'off',
+            'num': page_size,
+            'start': start_index,
+        }
+
+    if engine == 'bing':
+        return {
+            'mkt': _serpapi_bing_market(normalized_lang),
+            'count': page_size,
+            'first': start_index + 1,
+        }
+
+    if engine == 'duckduckgo':
+        params = {
+            'kl': _serpapi_duckduckgo_region(normalized_lang),
+            'start': start_index,
+            'm': page_size,
+        }
+        if duckduckgo_df:
+            params['df'] = duckduckgo_df
+        return params
+
+    return {}
 
 
 def _build_serpapi_windows(
@@ -421,6 +482,26 @@ def _serpapi_google_domain(lang: str) -> str:
     if lang == 'en':
         return 'google.com'
     return 'google.com'
+
+
+def _serpapi_bing_market(lang: str) -> str:
+    """Return the Bing market matching the requested language."""
+
+    mapping = {
+        'fr': 'fr-FR',
+        'en': 'en-US',
+    }
+    return mapping.get(lang, 'en-US')
+
+
+def _serpapi_duckduckgo_region(lang: str) -> str:
+    """Return the DuckDuckGo region code for the given language."""
+
+    mapping = {
+        'fr': 'fr-fr',
+        'en': 'us-en',
+    }
+    return mapping.get(lang, 'us-en')
 
 
 def fetch_seorank_for_url(url: str, api_key: str) -> Optional[dict]:
