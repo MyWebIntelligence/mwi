@@ -117,6 +117,9 @@ def command_input():
                         help='Date window size when iterating between datestart/dateend (day|week|month)',
                         default='week',
                         nargs='?')
+    parser.add_argument('--progress',
+                        action='store_true',
+                        help='Display SerpAPI progress per date window')
     parser.add_argument('--sleep',
                         type=float,
                         help='Base delay (seconds) between SerpAPI calls to avoid rate limits',

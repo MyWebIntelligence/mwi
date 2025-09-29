@@ -345,6 +345,9 @@ python mywi.py land urlist --name="MonSujet" --query="(mot clé)" \
 ```
 - Nécessite `settings.serpapi_api_key` ou `MWI_SERPAPI_API_KEY`.
 - `--sleep` contrôle la pause entre pages (défaut : 1 s).
+- Si une plage de dates est fournie (ou si vous ajoutez `--progress`), le terminal
+  affiche une ligne par fenêtre temporelle avec les dates couvertes et le nombre
+  d'URLs récupérées via SerpAPI.
 
 ### 6. Supprimer des données
 - Supprimer un land entier :

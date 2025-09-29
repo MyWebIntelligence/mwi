@@ -458,6 +458,20 @@ class LandController:
         timestep = getattr(args, 'timestep', 'week') or 'week'
         sleep_seconds = core.get_arg_option('sleep', args, set_type=float, default=1.0)
 
+        progress_requested = bool(getattr(args, 'progress', False))
+        has_date_range = bool(datestart and dateend)
+        want_progress = progress_requested or has_date_range
+
+        progress_callback = None
+        if want_progress:
+            def progress_callback(window_start, window_end, window_count):
+                if window_start and window_end:
+                    start_label = window_start.isoformat()
+                    end_label = window_end.isoformat()
+                    print(f'[urlist] {start_label} → {end_label} — fetched {window_count} results', flush=True)
+                else:
+                    print(f'[urlist] fetched {window_count} results (no date filter)', flush=True)
+
         try:
             # Centralised helper handles pagination, date windows and error reporting.
             serp_results = core.fetch_serpapi_url_list(
@@ -467,7 +481,8 @@ class LandController:
                 datestart=datestart,
                 dateend=dateend,
                 timestep=timestep,
-                sleep_seconds=sleep_seconds
+                sleep_seconds=sleep_seconds,
+                progress_hook=progress_callback
             )
         except core.SerpApiError as error:
             print(f'[urlist] {error}')

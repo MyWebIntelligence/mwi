@@ -1183,6 +1183,8 @@ variables:
 Date filters (`--datestart`, `--dateend`, `--timestep`) are optional but must be
 provided as valid `YYYY-MM-DD` strings when used. The command sleeps between
 pages (`--sleep`) to avoid rate limits; set it to `0` for tests/mocks only.
+When a date range is provided (or when you add `--progress`), the CLI prints one
+line per window indicating the covered dates and how many URLs SerpAPI returned.
 
 ### Testing
 

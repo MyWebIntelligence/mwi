@@ -10,7 +10,7 @@ import time
 from argparse import Namespace
 from datetime import date, datetime, timedelta
 from os import path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse, urljoin, quote
 
 import aiohttp # type: ignore
@@ -228,7 +228,8 @@ def fetch_serpapi_url_list(
     datestart: Optional[str] = None,
     dateend: Optional[str] = None,
     timestep: str = 'week',
-    sleep_seconds: float = 1.0
+    sleep_seconds: float = 1.0,
+    progress_hook: Optional[Callable[[Optional[date], Optional[date], int], None]] = None
 ) -> List[Dict[str, Optional[Union[str, int]]]]:
     """Query SerpAPI for Google organic results and return URL metadata.
 
@@ -245,6 +246,8 @@ def fetch_serpapi_url_list(
         timestep: Window size when iterating between ``datestart`` and
             ``dateend`` (``day`` | ``week`` | ``month``).
         sleep_seconds: Base delay between HTTP calls to avoid rate limits.
+        progress_hook: Optional callable invoked after each date window with
+            the start date, end date and number of fetched results.
 
     Returns:
         A list of dictionaries containing ``position``, ``title``, ``link`` and
@@ -279,6 +282,7 @@ def fetch_serpapi_url_list(
     for window_start, window_end in date_windows:
         # Pagination resets for every date window so we can cover the full range.
         start_index = 0
+        window_count = 0
         while True:
             params = {
                 'api_key': api_key,
@@ -328,6 +332,7 @@ def fetch_serpapi_url_list(
                     'link': entry.get('link'),
                     'date': entry.get('date'),
                 })
+                window_count += 1
 
             start_index += page_size
 
@@ -339,6 +344,9 @@ def fetch_serpapi_url_list(
             effective_sleep = max(0.0, float(sleep_seconds)) * random.uniform(jitter_floor, jitter_ceil)
             if effective_sleep > 0:
                 time.sleep(effective_sleep)
+
+        if progress_hook:
+            progress_hook(window_start, window_end, window_count)
 
     return aggregated
 
