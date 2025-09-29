@@ -412,6 +412,7 @@ def test_fetch_serpapi_url_list_duckduckgo_handles_empty(monkeypatch):
         def json(self):
             return self._payload
 
+    captured_params = []
     responses = [
         DummyResponse({'error': "DuckDuckGo hasn't returned any results for this query."}),
         DummyResponse({
@@ -423,6 +424,7 @@ def test_fetch_serpapi_url_list_duckduckgo_handles_empty(monkeypatch):
     ]
 
     def fake_get(url, params, timeout):
+        captured_params.append(dict(params))
         return responses.pop(0)
 
     monkeypatch.setattr(core_module.requests, 'get', fake_get, raising=True)
@@ -433,12 +435,14 @@ def test_fetch_serpapi_url_list_duckduckgo_handles_empty(monkeypatch):
         engine='duckduckgo',
         lang='fr',
         datestart='2024-03-01',
-        dateend='2024-03-31',
+        dateend='2024-04-30',
         timestep='month',
         sleep_seconds=0.0,
     )
 
     assert len(results) == 1
+    assert captured_params[0]['df'] == '2024-03-01..2024-03-31'
+    assert captured_params[1]['df'] == '2024-04-01..2024-04-30'
 
 
 def test_domain_crawl_cli(fresh_db, monkeypatch):
