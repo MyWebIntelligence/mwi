@@ -316,7 +316,8 @@ def fetch_serpapi_url_list(
                 start_index,
                 page_size,
                 window_start=window_start,
-                window_end=window_end
+                window_end=window_end,
+                use_date_filter=bool(window_start and window_end)
             ))
 
             if engine == 'google' and window_start and window_end:
@@ -427,20 +428,23 @@ def _build_serpapi_params(
     start_index: int,
     page_size: int,
     window_start: Optional[date] = None,
-    window_end: Optional[date] = None
+    window_end: Optional[date] = None,
+    use_date_filter: bool = False
 ) -> Dict[str, Union[str, int]]:
     normalized_lang = (lang or 'fr').strip().lower() or 'fr'
 
     if engine == 'google':
-        return {
+        params: Dict[str, Union[str, int]] = {
             'google_domain': _serpapi_google_domain(normalized_lang),
             'gl': normalized_lang,
             'hl': normalized_lang,
             'lr': f'lang_{normalized_lang}',
             'safe': 'off',
-            'num': page_size,
             'start': start_index,
         }
+        if not use_date_filter:
+            params['num'] = page_size
+        return params
 
     if engine == 'bing':
         return {

@@ -510,6 +510,50 @@ def test_fetch_serpapi_url_list_google_paginates(monkeypatch):
     assert len(results) == 25
     assert captured_params[0]['start'] == 0
     assert captured_params[1]['start'] == 20
+    assert 'num' not in captured_params[0]
+
+
+def test_fetch_serpapi_url_list_google_no_date_uses_num(monkeypatch):
+    from mwi import core as core_module
+
+    class DummyResponse:
+        def __init__(self, payload):
+            self.status_code = 200
+            self.text = ''
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    captured_params = []
+    responses = [
+        DummyResponse({
+            'organic_results': [
+                {'link': 'https://example.com/a', 'title': 'A', 'position': 1, 'date': None}
+            ],
+            'serpapi_pagination': {},
+        })
+    ]
+
+    def fake_get(url, params, timeout):
+        captured_params.append(dict(params))
+        return responses.pop(0)
+
+    monkeypatch.setattr(core_module.requests, 'get', fake_get, raising=True)
+
+    results = core_module.fetch_serpapi_url_list(
+        api_key='TEST',
+        query='google no date',
+        engine='google',
+        lang='fr',
+        datestart=None,
+        dateend=None,
+        timestep='week',
+        sleep_seconds=0.0,
+    )
+
+    assert len(results) == 1
+    assert captured_params[0]['num'] == 100
 
 
 def test_domain_crawl_cli(fresh_db, monkeypatch):
