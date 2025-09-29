@@ -100,6 +100,10 @@ def command_input():
                         help='Merge strategy for readable: smart_merge, mercury_priority, preserve_existing',
                         default='smart_merge',
                         nargs='?')
+    parser.add_argument('--llm',
+                        type=str,
+                        help='Toggle OpenRouter validation during readable pipeline (true|false, default=false)',
+                        default='false')
     parser.add_argument('--query',
                         type=str,
                         help='Search query to fetch URLs from SerpAPI',

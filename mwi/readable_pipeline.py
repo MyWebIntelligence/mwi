@@ -62,12 +62,14 @@ class MercuryReadablePipeline:
                  mercury_path: str = "mercury-parser",
                  merge_strategy: MergeStrategy = MergeStrategy.SMART_MERGE,
                  batch_size: int = 10,
-                 max_retries: int = 3):
+                 max_retries: int = 3,
+                 llm_enabled: bool = False):
         self.mercury_path = mercury_path
         self.merge_strategy = merge_strategy
         self.batch_size = batch_size
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
+        self.llm_enabled = llm_enabled
         self.stats = {
             'processed': 0,
             'updated': 0,
@@ -526,15 +528,12 @@ class MercuryReadablePipeline:
             relevance = None
             try:
                 import settings
-                if getattr(settings, 'openrouter_enabled', False) and settings.openrouter_api_key and settings.openrouter_model:
+                relevance = self._calculate_relevance(dictionary, expression)
+                if self.llm_enabled and getattr(settings, 'openrouter_enabled', False) and settings.openrouter_api_key and settings.openrouter_model:
                     from .llm_openrouter import is_relevant_via_openrouter
                     verdict = is_relevant_via_openrouter(expression.land, expression)
                     if verdict is False:
                         relevance = 0
-                    else:
-                        relevance = self._calculate_relevance(dictionary, expression)
-                else:
-                    relevance = self._calculate_relevance(dictionary, expression)
             except Exception as e:
                 print(f"OpenRouter gate error for {expression.url}: {e}")
                 relevance = self._calculate_relevance(dictionary, expression)
@@ -646,7 +645,8 @@ class MercuryReadablePipeline:
 async def run_readable_pipeline(land: model.Land,
                               limit: Optional[int] = None,
                               depth: Optional[int] = None,
-                              merge_strategy: str = 'smart_merge') -> Tuple[int, int]:
+                              merge_strategy: str = 'smart_merge',
+                              llm_enabled: bool = False) -> Tuple[int, int]:
     """
     Point d'entrée pour le contrôleur
 
@@ -660,12 +660,14 @@ async def run_readable_pipeline(land: model.Land,
     }
 
     pipeline = MercuryReadablePipeline(
-        merge_strategy=strategy_map.get(merge_strategy, MergeStrategy.SMART_MERGE)
+        merge_strategy=strategy_map.get(merge_strategy, MergeStrategy.SMART_MERGE),
+        llm_enabled=llm_enabled
     )
 
     print(f"🚀 Starting readable pipeline for land: {land.name}")
     print(f"🔧 Merge strategy: {merge_strategy}")
     print(f"📦 Processing limit: {limit or 'unlimited'}, depth: {depth or 'all'}")
+    print(f"🤖 OpenRouter validation: {'enabled' if llm_enabled else 'disabled'}")
 
     try:
         stats = await pipeline.process_land(land, limit, depth)

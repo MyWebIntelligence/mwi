@@ -86,7 +86,10 @@ def test_land_addterm_addurl_and_crawl_readable_export(fresh_db, tmp_path, monke
     monkeypatch.setattr(controller.core, "crawl_land", _fake_crawl_land)
     # readable() uses run_readable_pipeline from mwi.readable_pipeline
     import mwi.readable_pipeline as rp
-    async def _fake_run_readable_pipeline(land, limit, depth, merge):
+    llm_flags = []
+
+    async def _fake_run_readable_pipeline(land, limit, depth, merge, llm_enabled):
+        llm_flags.append(llm_enabled)
         return (0, 0)
     monkeypatch.setattr(rp, "run_readable_pipeline", _fake_run_readable_pipeline)
 
@@ -97,6 +100,11 @@ def test_land_addterm_addurl_and_crawl_readable_export(fresh_db, tmp_path, monke
     # Readable pipeline
     ret = controller.LandController.readable(core.Namespace(name=name, limit=1, depth=None, merge="smart_merge"))
     assert ret == 1
+    assert llm_flags[-1] is False
+
+    ret = controller.LandController.readable(core.Namespace(name=name, limit=1, depth=None, merge="smart_merge", llm="true"))
+    assert ret == 1
+    assert llm_flags[-1] is True
 
     # Export: validate types and that dispatcher accepts them
     called = {"n": 0}

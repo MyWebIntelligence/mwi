@@ -376,12 +376,13 @@ python mywi.py land crawl --name="MonSujet" [--limit N] [--http CODE] [--depth D
 
 Pré-requis : `npm install -g @postlight/mercury-parser`
 ```bash
-python mywi.py land readable --name="MonSujet" [--limit N] [--depth D] [--merge stratégie]
+python mywi.py land readable --name="MonSujet" [--limit N] [--depth D] [--merge stratégie] [--llm=true|false]
 ```
 Stratégies de fusion :
 - `smart_merge` (défaut) : privilégie Mercury pour le contenu, conserve les métadonnées les plus riches.
 - `mercury_priority` : Mercury écrase toujours les données existantes.
 - `preserve_existing` : complète uniquement les champs vides.
+- `--llm` (défaut `false`) : positionnez `true` pour activer la vérification OpenRouter lors de la mise à jour de la pertinence.
 
 ### 3. Capturer les métriques SEO Rank
 ```bash

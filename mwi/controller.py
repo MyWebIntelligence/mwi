@@ -599,12 +599,15 @@ class LandController:
         fetch_limit = core.get_arg_option('limit', args, set_type=int, default=0)
         depth_limit = core.get_arg_option('depth', args, set_type=int, default=None)
         merge_strategy = core.get_arg_option('merge', args, set_type=str, default='smart_merge')
-        
+        llm_option = core.get_arg_option('llm', args, set_type=str, default='false')
+        llm_enabled = str(llm_option).strip().lower() in ('true', '1', 'yes', 'on')
+
         if fetch_limit > 0:
             print(f'Fetch limit set to {fetch_limit} URLs')
         if depth_limit is not None:
             print(f'Depth limit set to {depth_limit}')
         print(f'Merge strategy: {merge_strategy}')
+        print(f'OpenRouter validation: {"enabled" if llm_enabled else "disabled"}')
         
         land = model.Land.get_or_none(model.Land.name == args.name)
         if land is None:
@@ -620,7 +623,7 @@ class LandController:
         
         loop = asyncio.get_event_loop()
         results = loop.run_until_complete(
-            run_readable_pipeline(land, fetch_limit, depth_limit, merge_strategy)
+            run_readable_pipeline(land, fetch_limit, depth_limit, merge_strategy, llm_enabled)
         )
         
         print("%d expressions processed (%d errors)" % results)

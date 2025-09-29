@@ -423,7 +423,7 @@ sudo npm install -g @postlight/mercury-parser
 
 **Command:**
 ```bash
-python mywi.py land readable --name="MyResearchTopic" [--limit=NUMBER] [--depth=NUMBER] [--merge=STRATEGY]
+python mywi.py land readable --name="MyResearchTopic" [--limit=NUMBER] [--depth=NUMBER] [--merge=STRATEGY] [--llm=true|false]
 ```
 
 | Option   | Type   | Required | Default | Description                                         |
@@ -432,6 +432,7 @@ python mywi.py land readable --name="MyResearchTopic" [--limit=NUMBER] [--depth=
 | --limit  | int    | No       |         | Maximum number of pages to process in this run      |
 | --depth  | int    | No       |         | Maximum crawl depth to process (e.g., 2 = seeds + 2 levels) |
 | --merge  | str    | No       | smart_merge | Merge strategy for content fusion (see below)    |
+| --llm    | bool   | No       | false   | Enable OpenRouter relevance check (`true` to activate) |
 
 **Merge Strategies:**
 
@@ -475,6 +476,9 @@ python mywi.py land readable --name="AsthmaResearch" --merge=preserve_existing
 
 # Advanced: Limited processing with specific strategy
 python mywi.py land readable --name="AsthmaResearch" --limit=100 --depth=1 --merge=smart_merge
+
+# Trigger OpenRouter validation (requires OpenRouter configuration)
+python mywi.py land readable --name="AsthmaResearch" --llm=true
 ```
 
 **Output:** The pipeline provides detailed statistics including:
