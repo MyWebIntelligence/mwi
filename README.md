@@ -410,6 +410,11 @@ python mywi.py land crawl --name="AsthmaResearch" --depth=2
 python mywi.py land crawl --name="AsthmaResearch" --depth=1 --limit=5
 ```
 
+> **Tip (Bash)** — Running multiple small batches can be faster than a single huge crawl. On macOS/Linux you can loop the crawler in one line:
+> ```bash
+> for i in {1..100}; do python mywi.py land crawl --name="melenchon" --depth=0 --limit=100; done
+> ```
+
 ---
 
 ### 2. Fetch Readable Content (Mercury Parser Pipeline)

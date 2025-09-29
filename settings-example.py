@@ -51,6 +51,35 @@ media_extract_exif = True
 media_n_dominant_colors = 5
 
 
+# OpenRouter relevance gate (disabled by default)
+openrouter_enabled = os.getenv("MWI_OPENROUTER_ENABLED", "false").lower() == "true"
+openrouter_api_key = os.getenv("MWI_OPENROUTER_API_KEY", "")
+openrouter_model = os.getenv("MWI_OPENROUTER_MODEL", "deepseek/deepseek-chat-v3.1")
+# Exemples de modèles compatibles OpenRouter (mini/éco)
+# Renseignez `openrouter_model` avec l'un de ces slugs si vous activez la passerelle
+openrouter_model_examples = [
+    # OpenAI
+    "openai/gpt-4o-mini",
+    # Anthropic
+    "anthropic/claude-3-haiku",
+    # Google
+    "google/gemini-1.5-flash",
+    # Meta (Llama 3.x Instruct – 8B)
+    "meta-llama/llama-3.1-8b-instruct",
+    # Mistral
+    "mistralai/mistral-small-latest",
+    # Qwen (Alibaba)
+    "qwen/qwen2.5-7b-instruct",
+    # Cohere
+    "cohere/command-r-mini",
+]
+openrouter_timeout = int(os.getenv("MWI_OPENROUTER_TIMEOUT", "15"))
+# Bounds to control costs/latency
+openrouter_readable_min_chars = int(os.getenv("MWI_OPENROUTER_MIN_CHARS", "140"))
+openrouter_readable_max_chars = int(os.getenv("MWI_OPENROUTER_MAX_CHARS", "12000"))
+openrouter_max_calls_per_run = int(os.getenv("MWI_OPENROUTER_MAX_CALLS", "500"))
+
+
 
 # SEO Rank enrichment (land seorank)
 seorank_api_base_url = os.getenv(
