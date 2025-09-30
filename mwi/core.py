@@ -416,6 +416,86 @@ def fetch_serpapi_url_list(
     return aggregated
 
 
+def parse_serp_result_date(value: Optional[str]) -> Optional[datetime]:
+    """Parse the ``date`` field returned by SerpAPI organic results.
+
+    The payload is inconsistent (absolute dates like ``Apr 2, 2024`` or
+    relative strings such as ``2 days ago``). We normalise the string and try a
+    series of lightweight parsing strategies. When parsing fails we return
+    ``None`` so callers can skip the update gracefully.
+    """
+
+    if not value:
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    # Remove common prefixes and punctuation quirks.
+    normalized = re.sub(r'(?i)^(updated|publié[e]?)[:\s-]+', '', normalized)
+    normalized = normalized.replace('·', ' ')
+    normalized = normalized.replace('\u2013', ' ').replace('\u2014', ' ')
+    normalized = re.sub(r'\s+', ' ', normalized).strip(' .-')
+    normalized = re.sub(r'(?i)\b([A-Za-z]{3,9})\.', r'\1', normalized)
+    normalized = re.sub(r'(?<=\d)(st|nd|rd|th)', '', normalized, flags=re.IGNORECASE)
+
+    # Try ISO formats first (SerpAPI sometimes emits them directly).
+    iso_candidate = normalized.replace('Z', '+00:00')
+    try:
+        return datetime.fromisoformat(iso_candidate)
+    except ValueError:
+        pass
+
+    for fmt in (
+        '%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d',
+        '%m/%d/%Y', '%d/%m/%Y', '%d.%m.%Y', '%m.%d.%Y',
+        '%b %d, %Y', '%B %d, %Y', '%d %b %Y', '%d %B %Y'
+    ):
+        try:
+            return datetime.strptime(normalized, fmt)
+        except ValueError:
+            continue
+
+    lowered = normalized.lower()
+    if lowered in {'today'}:
+        return datetime.now()
+    if lowered in {'yesterday'}:
+        return datetime.now() - timedelta(days=1)
+
+    relative_match = re.match(r'(?i)^(?:about\s+)?(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago$', normalized)
+    if relative_match:
+        amount = int(relative_match.group(1))
+        unit = relative_match.group(2).lower()
+
+        delta_kwargs = {
+            'minute': {'minutes': amount},
+            'hour': {'hours': amount},
+            'day': {'days': amount},
+            'week': {'weeks': amount},
+            'month': {'days': amount * 30},
+            'year': {'days': amount * 365},
+        }.get(unit)
+
+        if delta_kwargs:
+            return datetime.now() - timedelta(**delta_kwargs)
+
+    return None
+
+
+def prefer_earlier_datetime(
+    current_value: Optional[datetime],
+    candidate: Optional[datetime]
+) -> Optional[datetime]:
+    """Return the earliest non-null datetime between ``current`` and ``candidate``."""
+
+    if candidate is None:
+        return current_value
+    if current_value is None:
+        return candidate
+    return candidate if candidate < current_value else current_value
+
+
 def _serpapi_page_size(engine: str) -> int:
     if engine == 'google':
         return 100

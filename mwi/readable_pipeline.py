@@ -12,7 +12,7 @@ from enum import Enum
 import aiohttp
 
 from . import model
-from .core import get_land_dictionary
+from .core import get_land_dictionary, prefer_earlier_datetime
 
 
 class MergeStrategy(Enum):
@@ -450,6 +450,14 @@ class MercuryReadablePipeline:
         """
         Fusion intelligente selon le type de champ
         """
+        if field_name == 'published_at':
+            if mercury_value is None:
+                return current_value
+            if not isinstance(mercury_value, datetime):
+                return current_value
+            current_dt = current_value if isinstance(current_value, datetime) else None
+            return prefer_earlier_datetime(current_dt, mercury_value)
+
         if field_name == 'title':
             # Préfère le titre le plus long et informatif
             if len(str(mercury_value)) > len(str(current_value)):
@@ -675,7 +683,8 @@ async def run_readable_pipeline(land: model.Land,
 
     print(f"🚀 Starting readable pipeline for land: {land.name}")
     print(f"🔧 Merge strategy: {merge_strategy}")
-    print(f"📦 Processing limit: {limit or 'unlimited'}, depth: {depth or 'all'}")
+    depth_display = depth if depth is not None else 'all'
+    print(f"📦 Processing limit: {limit or 'unlimited'}, depth: {depth_display}")
     print(f"🤖 OpenRouter validation: {'enabled' if llm_enabled else 'disabled'}")
 
     try:

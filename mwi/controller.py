@@ -507,14 +507,25 @@ class LandController:
                 skipped += 1
                 continue
 
+            raw_date = item.get('date') if engine == 'google' else None
+            published_at = core.parse_serp_result_date(raw_date) if raw_date else None
+
             existing = model.Expression.get_or_none(
                 (model.Expression.land == land) & (model.Expression.url == url)
             )
             title = item.get('title')
             if existing is not None:
                 # Update the title if we collected one and the expression is still blank.
+                has_changes = False
                 if title and not existing.title:
                     existing.title = title
+                    has_changes = True
+                if published_at:
+                    earliest = core.prefer_earlier_datetime(existing.published_at, published_at)
+                    if earliest != existing.published_at:
+                        existing.published_at = earliest
+                        has_changes = True
+                if has_changes:
                     existing.save()
                 skipped += 1
                 continue
@@ -522,8 +533,16 @@ class LandController:
             expression = core.add_expression(land, url)
             if expression:
                 # Newly created expressions keep the title for downstream exports.
+                has_changes = False
                 if title and not expression.title:
                     expression.title = title
+                    has_changes = True
+                if published_at:
+                    earliest = core.prefer_earlier_datetime(expression.published_at, published_at)
+                    if earliest != expression.published_at:
+                        expression.published_at = earliest
+                        has_changes = True
+                if has_changes:
                     expression.save()
                 added += 1
             else:
