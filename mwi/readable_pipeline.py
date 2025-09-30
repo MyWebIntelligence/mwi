@@ -120,7 +120,8 @@ class MercuryReadablePipeline:
         """Récupère les expressions à traiter selon les critères"""
         query = model.Expression.select().where(
             (model.Expression.land == land) &
-            (model.Expression.readable.is_null(True))
+            (model.Expression.fetched_at.is_null(False)) &
+            (model.Expression.readable_at.is_null(True))
         )
 
         # Filtre par profondeur si spécifié
@@ -129,7 +130,7 @@ class MercuryReadablePipeline:
 
         # Ordre par priorité : d'abord celles jamais traitées, puis par date
         query = query.order_by(
-            model.Expression.readable_at.asc(nulls='first'),
+            model.Expression.fetched_at.asc(nulls='first'),
             model.Expression.depth.asc()
         )
 
@@ -170,6 +171,9 @@ class MercuryReadablePipeline:
 
             if mercury_result.error:
                 self.logger.warning(f"Mercury extraction failed for {expression.url}: {mercury_result.error}")
+                setattr(expression, 'readable_at', datetime.now())
+                expression.save()
+                print(f"🕒 Marked readable attempt (failure) for {expression.url}")
                 return None
 
             # Préparation de la mise à jour
