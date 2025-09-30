@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
-import trafilatura # type: ignore
+import aiohttp
 
 from . import model
 from .core import get_land_dictionary
@@ -75,7 +75,7 @@ class MercuryReadablePipeline:
             'updated': 0,
             'errors': 0,
             'skipped': 0,
-            'fallback_used': 0
+            'wayback_used': 0
         }
 
     async def process_land(self,
@@ -192,9 +192,48 @@ class MercuryReadablePipeline:
             raise
 
     async def _extract_with_mercury(self, url: str) -> MercuryResult:
-        """
-        Extraction avec Mercury Parser via subprocess
-        """
+        """Extraction Mercury + fallback Wayback si nécessaire."""
+        primary_result = await self._run_mercury(url)
+
+        if not primary_result.error:
+            return primary_result
+
+        error_message = primary_result.error
+        self.logger.warning(f"Mercury extraction failed for {url}: {error_message}")
+        print(f"⚠️ Mercury failed for {url}: {error_message}")
+
+        snapshot = await self._fetch_wayback_first_snapshot(url)
+        if not snapshot:
+            print(f"🚫 No Wayback snapshot available for {url}")
+            return primary_result
+
+        snapshot_url, snapshot_timestamp = snapshot
+        self.logger.info(f"Found Wayback snapshot {snapshot_url} for {url}")
+        print(f"📼 Wayback snapshot found ({snapshot_timestamp}) for {url}")
+
+        wayback_result = await self._run_mercury(snapshot_url)
+        if wayback_result.error:
+            self.logger.warning(
+                f"Mercury failed on Wayback snapshot {snapshot_url} for {url}: {wayback_result.error}"
+            )
+            print(
+                f"❌ Mercury failed on Wayback snapshot {snapshot_url}: {wayback_result.error}"
+            )
+            return primary_result
+
+        if wayback_result.raw_response is None:
+            wayback_result.raw_response = {}
+        wayback_result.raw_response['source'] = 'wayback'
+        wayback_result.raw_response['wayback_timestamp'] = snapshot_timestamp
+        wayback_result.raw_response['wayback_snapshot_url'] = snapshot_url
+        wayback_result.raw_response['original_url'] = url
+
+        self.stats['wayback_used'] += 1
+        print(f"✅ Mercury succeeded via Wayback snapshot for {url}")
+        return wayback_result
+
+    async def _run_mercury(self, url: str) -> MercuryResult:
+        """Exécute Mercury Parser et retourne le résultat brut."""
         result = MercuryResult(extraction_timestamp=datetime.now())
 
         for attempt in range(self.max_retries):
@@ -210,16 +249,14 @@ class MercuryReadablePipeline:
                 if proc.returncode != 0:
                     error_msg = stderr.decode() if stderr else "Unknown error"
                     if attempt < self.max_retries - 1:
-                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        await asyncio.sleep(2 ** attempt)
                         continue
                     result.error = error_msg
                     break
 
-                # Parse JSON response
                 data = json.loads(stdout.decode())
                 result.raw_response = data
 
-                # Mapping des champs Mercury vers notre structure
                 result.title = data.get('title')
                 result.content = data.get('content')
                 result.markdown = data.get('markdown', data.get('content'))
@@ -234,7 +271,6 @@ class MercuryReadablePipeline:
                 result.rendered_pages = data.get('rendered_pages')
                 result.next_page_url = data.get('next_page_url')
 
-                # Extraction des médias et liens
                 self._extract_media_and_links(data, result)
 
                 return result
@@ -249,82 +285,55 @@ class MercuryReadablePipeline:
                 result.error = str(e)
                 break
 
-        if result.error and self._should_try_trafilatura_fallback(result.error):
-            fallback_result = await self._fallback_with_trafilatura(url)
-            if fallback_result:
-                self.logger.info(f"Trafilatura fallback succeeded for {url}")
-                self.stats['fallback_used'] += 1
-                return fallback_result
-            self.logger.warning(f"Trafilatura fallback failed for {url}: {result.error}")
-
         return result
 
-    def _should_try_trafilatura_fallback(self, error_message: Optional[str]) -> bool:
-        """Détermine si l'on doit tenter un fallback trafilatura."""
-        if not error_message:
-            return False
-        network_markers = (
-            'ECONNREFUSED',
-            'ECONNRESET',
-            'ETIMEDOUT',
-            'EHOSTUNREACH',
-            'ENOTFOUND',
-            'EAI_AGAIN',
-            'connect ETIMEDOUT',
-        )
-        return any(marker in error_message for marker in network_markers)
+    async def _fetch_wayback_first_snapshot(self, url: str) -> Optional[Tuple[str, str]]:
+        """Récupère la première snapshot Wayback disponible pour l'URL donnée."""
+        base_url = "https://web.archive.org/cdx/search/cdx"
+        params_common = {
+            'url': url,
+            'output': 'json',
+            'limit': '1',
+            'matchType': 'exact'
+        }
+        queries = [
+            {**params_common, 'filter': 'statuscode:200'},
+            params_common
+        ]
 
-    async def _fallback_with_trafilatura(self, url: str) -> Optional[MercuryResult]:
-        """Fallback vers trafilatura lorsque Mercury ne peut pas joindre la ressource."""
-        try:
-            downloaded = await asyncio.to_thread(trafilatura.fetch_url, url)
-        except Exception as e:
-            self.logger.debug(f"Trafilatura fetch failed for {url}: {e}")
-            return None
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for query in queries:
+                try:
+                    async with session.get(base_url, params=query) as response:
+                        if response.status != 200:
+                            self.logger.debug(
+                                f"Wayback lookup HTTP {response.status} for {url} with params {query}"
+                            )
+                            continue
+                        try:
+                            payload = await response.json(content_type=None)
+                        except Exception as e:
+                            self.logger.debug(f"Wayback lookup JSON parse error for {url}: {e}")
+                            continue
 
-        if not downloaded:
-            return None
+                        if not isinstance(payload, list) or len(payload) < 2:
+                            continue
 
-        try:
-            markdown = trafilatura.extract(
-                downloaded,
-                include_links=True,
-                include_comments=False,
-                include_images=True,
-                output_format='markdown'
-            )
-        except Exception as e:
-            self.logger.debug(f"Trafilatura extract failed for {url}: {e}")
-            return None
+                        snapshot_row = payload[1]
+                        if len(snapshot_row) < 2:
+                            continue
 
-        if not markdown:
-            return None
+                        timestamp = snapshot_row[1]
+                        original = snapshot_row[2] if len(snapshot_row) > 2 else url
+                        snapshot_url = f"https://web.archive.org/web/{timestamp}/{original}"
+                        return snapshot_url, timestamp
+                except aiohttp.ClientError as e:
+                    self.logger.debug(f"Wayback lookup client error for {url}: {e}")
+                except Exception as e:
+                    self.logger.debug(f"Wayback lookup unexpected error for {url}: {e}")
 
-        metadata = None
-        try:
-            metadata = trafilatura.extract_metadata(downloaded)
-        except Exception as e:
-            self.logger.debug(f"Trafilatura metadata extraction failed for {url}: {e}")
-
-        result = MercuryResult(
-            title=(metadata.get('title') if metadata else None),
-            content=markdown,
-            markdown=markdown,
-            lead_image_url=(metadata.get('image') if metadata else None),
-            date_published=(metadata.get('date') if metadata else None),
-            author=(metadata.get('author') if metadata else None),
-            excerpt=(metadata.get('description') if metadata else None),
-            domain=(metadata.get('sitename') if metadata else None),
-            word_count=len(markdown.split()),
-            error=None,
-            extraction_timestamp=datetime.now(),
-            raw_response={'source': 'trafilatura'}
-        )
-
-        if metadata and metadata.get('lang'):
-            result.direction = metadata.get('lang')
-
-        return result
+        return None
 
     def _extract_media_and_links(self, data: Dict, result: MercuryResult) -> None:
         """Extrait les médias et liens du résultat Mercury"""
@@ -636,7 +645,7 @@ class MercuryReadablePipeline:
             'updated': self.stats['updated'],
             'errors': self.stats['errors'],
             'skipped': self.stats['skipped'],
-            'fallbacks': self.stats['fallback_used'],
+            'wayback_used': self.stats['wayback_used'],
             'success_rate': (self.stats['updated'] / self.stats['processed'] * 100)
                            if self.stats['processed'] > 0 else 0
         }
@@ -673,8 +682,8 @@ async def run_readable_pipeline(land: model.Land,
         stats = await pipeline.process_land(land, limit, depth)
         print(f"✅ Completed processing {stats['processed']} expressions")
         print(f"✔️ Updated: {stats['updated']}, Errors: {stats['errors']}, Skipped: {stats['skipped']}")
-        if stats.get('fallbacks'):
-            print(f"🛟 Trafilatura fallbacks used: {stats['fallbacks']}")
+        if stats.get('wayback_used'):
+            print(f"📼 Wayback snapshots used: {stats['wayback_used']}")
         return stats['processed'], stats['errors']
     except Exception as e:
         print(f"❌ Pipeline failed: {str(e)}")
