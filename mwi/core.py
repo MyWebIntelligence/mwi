@@ -1956,43 +1956,77 @@ def process_expression_content(expression: model.Expression, html: str, dictiona
 
 def extract_medias(content, expression: model.Expression):
     """
-    Extract media src (img, video) from html content
-    :param content:
-    :param expression:
-    :return:
+    Extract media references (img/video/audio) from HTML or markdown content linked to an expression.
+    Accepts either a BeautifulSoup object or raw text containing markdown markers.
     """
     print(f"Extracting media from #{expression.id}") # type: ignore
-    medias = []
+
     IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
     VIDEO_EXTENSIONS = (".mp4", ".webm", ".ogg", ".ogv", ".mov", ".avi", ".mkv")
     AUDIO_EXTENSIONS = (".mp3", ".wav", ".ogg", ".aac", ".flac", ".m4a")
-    
+
+    def has_allowed_extension(url: str, extensions: tuple) -> bool:
+        if not url:
+            return False
+        if url.lower().startswith('data:'):
+            return True
+        path_only = urlparse(url).path.lower()
+        return any(path_only.endswith(ext) for ext in extensions)
+
+    raw_representation = str(content)
+    soup = content if hasattr(content, 'find_all') else BeautifulSoup(raw_representation, 'html.parser')
+
+    collected_urls = {
+        media.url for media in
+        model.Media.select(model.Media.url).where(model.Media.expression == expression)
+    }
+
+    def register_media(raw_url: str, media_type: str):
+        if not raw_url:
+            return
+        clean_url = raw_url.strip()
+
+        if media_type == 'img' and not has_allowed_extension(clean_url, IMAGE_EXTENSIONS):
+            return
+
+        resolved_url = resolve_url(str(expression.url), clean_url)
+        if resolved_url in collected_urls:
+            return
+
+        collected_urls.add(resolved_url)
+        if not model.Media.select().where(
+            (model.Media.expression == expression) &
+            (model.Media.url == resolved_url)
+        ).exists():
+            media = model.Media.create(expression=expression, url=resolved_url, type=media_type)
+            media.save()
+
     for tag in ['img', 'video', 'audio']:
-        for element in content.find_all(tag):
-            src = element.get('src')
-            if src is None:
-                continue
-                
-            is_valid_src = src not in medias
+        for element in soup.find_all(tag):
+            primary_src = element.get('src')
+            if primary_src:
+                register_media(primary_src, tag)
+
             if tag == 'img':
-                is_valid_src = is_valid_src and src.lower().endswith(IMAGE_EXTENSIONS)
-            elif tag == 'video':
-                is_valid_src = is_valid_src and (src.lower().endswith(VIDEO_EXTENSIONS) or True)
-            elif tag == 'audio':
-                is_valid_src = is_valid_src and (src.lower().endswith(AUDIO_EXTENSIONS) or True)
-            
-            if is_valid_src:
-                # Resolve relative URLs to absolute URLs
-                resolved_url = resolve_url(str(expression.url), src)
-                medias.append(resolved_url)
-                
-                # Check if media doesn't already exist in database
-                if not model.Media.select().where(
-                    (model.Media.expression == expression) & 
-                    (model.Media.url == resolved_url)
-                ).exists():
-                    media = model.Media.create(expression=expression, url=resolved_url, type=tag)
-                    media.save()
+                srcset = element.get('srcset')
+                if srcset:
+                    for candidate in srcset.split(','):
+                        candidate_url = candidate.strip().split(' ')[0]
+                        register_media(candidate_url, 'img')
+            if tag in ('video', 'audio'):
+                for source in element.find_all('source'):
+                    register_media(source.get('src'), tag)
+
+    markdown_text = raw_representation if raw_representation else soup.get_text(separator='\n')
+
+    for match in re.findall(r'!\[[^\]]*\]\(([^)]+)\)', markdown_text):
+        register_media(match, 'img')
+
+    for label, url in re.findall(r'\[(IMAGE|VIDEO|AUDIO):\s*([^\]]+)\]', markdown_text, flags=re.IGNORECASE):
+        media_type = label.lower()
+        if media_type == 'image':
+            media_type = 'img'
+        register_media(url, media_type)
 
 
 def get_readable(content):
