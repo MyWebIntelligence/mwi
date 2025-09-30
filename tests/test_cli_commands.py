@@ -129,10 +129,10 @@ def test_land_consolidate_and_medianalyse(fresh_db, monkeypatch):
     assert controller.LandController.create(core.Namespace(name=name, desc="d", lang=["fr"])) == 1
 
     # Consolidate
-    async def _fake_consolidate_land(land, limit, depth):
+    async def _fake_consolidate_land(land, limit, depth, min_relevance):
         return (0, 0)
     monkeypatch.setattr(controller.core, "consolidate_land", _fake_consolidate_land)
-    ret = controller.LandController.consolidate(core.Namespace(name=name, limit=0, depth=None))
+    ret = controller.LandController.consolidate(core.Namespace(name=name, limit=0, depth=None, minrel=0))
     assert ret == 1
 
     # Medianalyse (land)

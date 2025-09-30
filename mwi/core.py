@@ -1393,12 +1393,18 @@ async def crawl_expression_with_media_analysis(expression: model.Expression, dic
         expression.save()
         return 0
 
-async def consolidate_land(land: model.Land, limit: int = 0, depth: Optional[int] = None) -> tuple:
+async def consolidate_land(
+    land: model.Land,
+    limit: int = 0,
+    depth: Optional[int] = None,
+    min_relevance: int = 0,
+) -> tuple:
     """
     Consolidate a land: for each expression, recalculate relevance, links, media, add missing docs, recreate links, replace old ones.
     :param land:
     :param limit:
     :param depth: Only process expressions at this depth (if not None)
+    :param min_relevance: Only consolidate expressions whose current relevance meets this threshold
     :return: (number of expressions consolidated, number of errors)
     """
     print(f"Consolidating land {land.id}") # type: ignore
@@ -1416,6 +1422,8 @@ async def consolidate_land(land: model.Land, limit: int = 0, depth: Optional[int
         query = query.where(model.Expression.depth == depth)
     if limit > 0:
         query = query.limit(limit)
+    if min_relevance > 0:
+        query = query.where(model.Expression.relevance >= min_relevance)
 
     total_processed = 0
     total_errors = 0

@@ -256,6 +256,7 @@ class LandController:
         core.check_args(args, 'name')
         fetch_limit = core.get_arg_option('limit', args, set_type=int, default=0)
         depth = core.get_arg_option('depth', args, set_type=int, default=None)
+        min_relevance = core.get_arg_option('minrel', args, set_type=int, default=0)
         land = model.Land.get_or_none(model.Land.name == args.name)
         if land is None:
             print('Land "%s" not found' % args.name)
@@ -263,8 +264,14 @@ class LandController:
             if sys.platform == 'win32':
                 asyncio.set_event_loop(asyncio.ProactorEventLoop())
             loop = asyncio.get_event_loop()
-            results = loop.run_until_complete(core.consolidate_land(land, fetch_limit, depth))
-            print("%d expressions consolidated (%d errors)" % results)
+            results = loop.run_until_complete(
+                core.consolidate_land(land, fetch_limit, depth, min_relevance)
+            )
+            consolidated, errors = results
+            print(
+                f"%d expressions consolidated (%d errors, minrel=%d)"
+                % (consolidated, errors, min_relevance)
+            )
             return 1
         return 0
 
