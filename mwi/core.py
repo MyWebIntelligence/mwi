@@ -1407,7 +1407,10 @@ async def consolidate_land(land: model.Land, limit: int = 0, depth: Optional[int
     # Select expressions to process
     query = model.Expression.select().where(
         model.Expression.land == land,
-        model.Expression.fetched_at.is_null(False)
+        (
+            model.Expression.approved_at.is_null(False) |
+            model.Expression.readable_at.is_null(False)
+        )
     )
     if depth is not None:
         query = query.where(model.Expression.depth == depth)
@@ -1434,20 +1437,12 @@ async def consolidate_land(land: model.Land, limit: int = 0, depth: Optional[int
                 model.ExpressionLink.delete().where(model.ExpressionLink.source == expr.id).execute()
                 model.Media.delete().where(model.Media.expression == expr.id).execute()
 
-                # 2. Recalculer la relevance (avec garde-fou OpenRouter) et le contenu
+                # 2. Recalculer la relevance sans appel OpenRouter
                 try:
-                    from .llm_openrouter import is_relevant_via_openrouter
-                    if getattr(settings, 'openrouter_enabled', False) and settings.openrouter_api_key and settings.openrouter_model:
-                        verdict = is_relevant_via_openrouter(land, expr)  # type: ignore
-                        if verdict is False:
-                            expr.relevance = 0  # type: ignore
-                        else:
-                            expr.relevance = expression_relevance(dictionary, expr)  # type: ignore
-                    else:
-                        expr.relevance = expression_relevance(dictionary, expr)  # type: ignore
-                except Exception as e:
-                    print(f"OpenRouter gate error for {expr.url}: {e}")
                     expr.relevance = expression_relevance(dictionary, expr)  # type: ignore
+                except Exception as e:
+                    print(f"Error recalculating relevance for {expr.url}: {e}")
+                    expr.relevance = expr.relevance or 0  # type: ignore
                 expr.save()
 
                 # 3. Extraire les liens sortants du contenu lisible
