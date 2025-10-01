@@ -12,6 +12,7 @@ Toutes les données sont stockées dans SQLite (mode WAL), ce qui facilite l’i
 - [Utiliser Docker Compose (recommandé)](#utiliser-docker-compose-recommandé)
 - [Utiliser Docker (manuel)](#utiliser-docker-manuel)
 - [Installation locale](#installation-locale)
+- [Scripts utiles](#scripts-utiles)
 - [Notes générales](#notes-générales)
 - [Gestion des lands](#gestion-des-lands)
 - [Collecte de données](#collecte-de-données)
@@ -276,6 +277,21 @@ Notes
    ```bash
    python install_playwright.py
    ```
+
+---
+
+## Scripts utiles
+
+- `scripts/docker-compose-setup.sh` : setup Docker Compose automatisé. Crée/sauvegarde `.env`, lance l’assistant interactif, construit/démarre les services, initialise la DB, vérifie l’installation et teste les APIs/ML si pertinent. Usage : `./scripts/docker-compose-setup.sh [basic|api|llm]`.
+- `scripts/install-docker-compose.py` : générateur interactif de `.env` pour Compose (fuseau horaire, dossier de données, flags Playwright/ML, clés SerpAPI/SEO Rank/OpenRouter, embeddings/NLI). Usage : `python scripts/install-docker-compose.py [--level basic|api|llm] [--output .env]`.
+- `scripts/install-basic.py` : assistant interactif pour `settings.py` (chemins, timeouts, parallélisme, user‑agent, extraction dynamique, analyse médias, heuristiques par défaut). Usage : `python scripts/install-basic.py [--output settings.py]`.
+- `scripts/install-api.py` : configuration des APIs externes (SerpAPI, SEO Rank, OpenRouter) et écriture dans `settings.py` avec surcharges via variables d’environnement. Usage : `python scripts/install-api.py [--output settings.py]`.
+- `scripts/install-llm.py` : configuration des embeddings, modèles NLI et backend de similarité ; vérifie les dépendances ML et règle les paramètres de retry/backoff. Usage : `python scripts/install-llm.py [--output settings.py]`.
+- `scripts/test-apis.py` : test de connectivité des APIs. Usage : `python scripts/test-apis.py --all|--serpapi|--seorank|--openrouter [-v]` (nécessite un `settings.py` renseigné).
+- `scripts/install-nltk.py` : assure la présence des tokenizers NLTK `punkt` et `punkt_tab`. Usage : `python scripts/install-nltk.py`.
+- `scripts/sqlite_recover.sh` : récupération SQLite non destructive. Voir la section « Récupération SQLite ». Usage : `scripts/sqlite_recover.sh [INPUT_DB] [OUTPUT_DB]`.
+- `scripts/crawl_robuste.sh` : boucle robuste avec retries autour de `land crawl`. Éditer le nom du land/paramètres dans le script avant usage. Usage : `bash scripts/crawl_robuste.sh`.
+- `scripts/install_utils.py` : utilitaires partagés pour les assistants interactifs (à ne pas exécuter directement).
 
 ---
 

@@ -18,6 +18,7 @@ MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers i
   - [Exporting Data](#exporting-data)
   - [Heuristics](#heuristics)
 - [Testing](#testing)
+- [Helper Scripts](#helper-scripts)
 - [SQLite Recovery](#sqlite-recovery)
 - [License](#license)
 
@@ -39,171 +40,124 @@ MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers i
 
 # Installation
 
-You can install MyWI using Docker (recommended for ease of use) or by setting up a local development environment.
+**Three installation options:** Docker Compose (recommended), Docker manual, or Local Python.
 
-## Using Docker Compose (recommended)
+> 📘 **Detailed guide:** See [docs/INSTALL_ZERO_bis.md](docs/INSTALL_ZERO_bis.md) for complete installation instructions with interactive setup scripts.
 
-Docker Compose is the easiest way to run MyWI because it installs everything in an isolated container and keeps your data on your computer. The steps below assume no prior Docker knowledge.
+## Quick Start: Docker Compose (Recommended)
 
-### Prerequisites
-- Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose) and start it before continuing.
-
-### Prerequisites:
-
-Python 3.10+
-pip (Python package installer)
-git
-
-### Step 0 – Clone the Project:
+**One-command automated setup:**
 ```bash
+./scripts/docker-compose-setup.sh llm
+```
+
+**Or step-by-step:**
+```bash
+# 1. Clone and prepare
 git clone https://github.com/MyWebIntelligence/mwi.git
 cd mwi
-mkdir data
-ls # check 'data' dir
-```
 
-### Step 1 – Prepare the configuration files
-1. Copy `.env.example` to `.env` (optional).
-   ```bash
-   cp .env.example .env
-   ```
-   - Note: `.env` is a hidden file on many systems. You can skip this step; Docker Compose has safe defaults. If you skip it, just ensure the host data folder exists (see next step).
-   - If you do use `.env`, keep the default `HOST_DATA_DIR=./data` to store the database and exports inside the repository, or replace it with an absolute path (for example `HOST_DATA_DIR=/Users/you/mywi_data` on macOS/Linux or `HOST_DATA_DIR=C:/Users/you/mywi_data` on Windows).
-2. Copy the sample settings file.
-   ```bash
-   cp settings-example.py settings.py
-   ```
-   - You can add API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) in `settings.py`. Alternatively, add them to `.env` as environment variables like `MWI_SERPAPI_API_KEY=...`; Docker Compose automatically passes them to the container.
-3. Choose or create your host data folder (if you skipped `.env`, defaults apply):
-   ```bash
-   mkdir -p ./data
-   ```
-   - Without `.env`, Docker Compose maps `./data` on the host to `/app/data` in the container. No extra configuration needed.
-   - If you prefer a different host folder, either set `HOST_DATA_DIR` in `.env` or edit the `volumes:` mapping in `docker-compose.yml`.
-   - If you also plan local (non-Docker) runs, you can set an absolute path in `settings.py:data_location`; in Docker, the default works because the app resolves `data` to `/app/data`.
+# 2. Configure (interactive wizard)
+python scripts/install-docker-compose.py
 
-### Step 2 – Build and start the services
-```bash
+# 3. Build and start
 docker compose up -d --build
-# Subsequent runs can use `docker compose up -d` only
-```
-The first run downloads dependencies, so it can take a few minutes. Subsequent runs can use `docker compose up -d`.
 
-### Step 3 – Initialize the database (first run only)
-```bash
+# 4. Initialize database
 docker compose exec mwi python mywi.py db setup
+
+# 5. Verify
+docker compose exec mwi python mywi.py land list
 ```
 
-### Step 4 – Stop or reset the environment
+**Where is my data?**
+
+- Computer: `./data` (default) or path set in `.env`
+- Container: `/app/data` (automatic mapping)
+
+**Management:**
 ```bash
-docker compose down          # stop the container
-docker compose down -v       # stop and delete the Docker volume (DESTROYS the database)
+docker compose up -d       # Start
+docker compose down        # Stop
+docker compose logs mwi    # View logs
+docker compose exec mwi bash  # Enter container
 ```
 
-#### Where is my data?
-- On your computer: the folder defined by `HOST_DATA_DIR` (default `./data` in the repository).
-- Inside the container: `/app/data`. `settings.py` already points to this location, so no extra configuration is needed.
+---
 
-## Annex — Docker (manual, advanced)
+## Manual Docker (Advanced)
 
-Use plain Docker when Compose isn’t available or for quick one‑off runs.
+For quick tests or when Compose isn't available:
+```bash
+# Build
+docker build -t mwi:latest .
 
-Steps
-- Build image: `docker build -t mwi:latest .`
-- Create host data folder: `mkdir -p ~/mywi_data` (or any path)
-- Run container: `docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest`
-- Init DB (first run): `docker exec -it mwi python mywi.py db setup`
-- Run commands: `docker exec -it mwi python mywi.py land list`
-- Manage: `docker stop mwi` · `docker start mwi` · `docker rm mwi`
+# Run
+docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest
 
-Notes
-- Pass secrets/keys with `-e MWI_*` flags, or set them in `settings.py`.
-- Default `settings.py:data_location = "data"` resolves to `/app/data` in the container.
+# Initialize
+docker exec -it mwi python mywi.py db setup
 
-## Local Development Setup
+# Use
+docker exec -it mwi python mywi.py land list
+```
 
-**Prerequisites:**
-*   Python 3.10+
-*   `pip` (Python package installer)
-*   `git`
+**Management:** `docker stop mwi` · `docker start mwi` · `docker rm mwi`
 
-**Steps:**
+---
 
-1.  **Clone the Project:**
-    ```bash
-    git clone https://github.com/MyWebIntelligence/mwi.git
-    cd mwi
-    mkdir data
-    ```
+## Local Installation
 
-2.  **Create and Activate Virtual Environment:**
-    Modern Python versions come with `venv` built-in.
-    - macOS/Linux:
-      ```bash
-      python3 -m venv .venv
-      source .venv/bin/activate
-      ```
-    - Windows (PowerShell):
-      ```bash
-      python -m venv .venv
-      .\.venv\Scripts\activate
-      ```
-    *(Note: If `python3` doesn't work, try `python`.)*
+**Prerequisites:** Python 3.10+, pip, git
 
-3.  **Install Dependencies:**
-    Use a clean, pip‑only environment and install base deps first. ML extras are optional.
-    ```bash
-    python -m pip install -U pip setuptools wheel
-    python -m pip install -r requirements.txt
-    # Optional (only if you use embeddings/NLI locally):
-    # python -m pip install -r requirements-ml.txt
-    ```
-    Tip — NLTK on Windows/macOS:
-    - If your first `crawl` shows an NLTK error like `Resource punkt_tab not found` or an SSL certificate error (`SSL: CERTIFICATE_VERIFY_FAILED`), install the resources locally:
-      ```bash
-      python -m nltk.downloader punkt punkt_tab
-      ```
-    - If a certificate error appears:
-      - macOS: run your Python’s “Install Certificates.command” or set `SSL_CERT_FILE` to the path from `python -c "import certifi; print(certifi.where())"`.
-      - Windows: `pip install certifi` and re-run the downloader above.
-    - MyWI also caches NLTK data in `data/nltk_data` and will fall back to a simple tokenizer if downloads fail, so relevance still computes.
+**Quick setup:**
+```bash
+# 1. Clone and create environment
+git clone https://github.com/MyWebIntelligence/mwi.git
+cd mwi
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
 
-4.  **Install Playwright Browsers:**
-    This is required for dynamic media analysis (scraping JavaScript-heavy sites).
-    ```bash
-    python install_playwright.py
-    ```
+# 2. Configure (interactive wizard)
+python -m pip install -U pip setuptools wheel
+python -m pip install -r requirements.txt
+python scripts/install-basic.py
 
-5.  **Verify Installation (Optional):**
-    You can run a test to ensure everything is working.
-    ```bash
-    python tests/test_dynamic_media.py
-    ```
-    This command should now run without any `ImportError`.
+# 3. Initialize database
+python mywi.py db setup
 
-    
+# 4. Verify
+python mywi.py land list
+```
 
-6.  **Create `settings.py` and configure paths/API keys:**
-    ```bash
-    cp settings-example.py settings.py
-    ```
-    - Create a data directory anywhere on your system and update the `data_location` value in `settings.py` to the absolute path of this directory.
-    - Provide API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) by editing the file or exporting environment variables such as `MWI_SERPAPI_API_KEY` before running commands.
-    ```python
-    # settings.py
-    data_location = "/path/to/your/local/data"
-    # e.g., "C:/Users/YourUser/mywi_data" on Windows
-    # or "/Users/youruser/mywi_data" on macOS/Linux
-    ```
+**Optional steps:**
 
-7.  **Setup Database:**
-    ```bash
-    python mywi.py db setup
-    ```
-    This command creates the database file in the `data_location` you specified. Warning: it will destroy any previous data if the database file already exists from a prior setup.
+- **API configuration:** `python scripts/install-api.py`
+- **LLM/embeddings:** `python -m pip install -r requirements-ml.txt && python scripts/install-llm.py`
+- **Playwright browsers:** `python install_playwright.py`
 
+**Troubleshooting NLTK (Windows/macOS):**
+```bash
+python -m nltk.downloader punkt punkt_tab
+# If SSL errors: pip install certifi
+```
 
-You are now ready to use MyWI commands as described in the [Usage](#usage) section using `python mywi.py ...`.
+---
+
+## Helper Scripts
+
+- `scripts/docker-compose-setup.sh`: Docker Compose quick setup. Creates/backups `.env`, runs the interactive configurator, builds/starts services, initializes DB, verifies install, and optionally tests APIs/ML. Usage: `./scripts/docker-compose-setup.sh [basic|api|llm]`.
+- `scripts/install-docker-compose.py`: Interactive generator for `.env` used by Docker Compose. Configures timezone, data directory mapping, Playwright/ML build flags, SerpAPI/SEO Rank/OpenRouter keys, and embeddings/NLI options. Usage: `python scripts/install-docker-compose.py [--level basic|api|llm] [--output .env]`.
+- `scripts/install-basic.py`: Interactive setup for a minimal `settings.py` (paths, timeouts, parallelism, user‑agent, dynamic media, media analysis, default heuristics). Usage: `python scripts/install-basic.py [--output settings.py]`.
+- `scripts/install-api.py`: Configure external APIs (SerpAPI, SEO Rank, OpenRouter) and write to `settings.py` with environment overrides. Usage: `python scripts/install-api.py [--output settings.py]`.
+- `scripts/install-llm.py`: Configure embeddings provider, NLI models, and similarity backend; checks ML deps and sets retry/backoff parameters. Usage: `python scripts/install-llm.py [--output settings.py]`.
+- `scripts/test-apis.py`: Smoke‑test API connectivity. Usage: `python scripts/test-apis.py --all|--serpapi|--seorank|--openrouter [-v]` (requires a populated `settings.py`).
+- `scripts/install-nltk.py`: Ensure NLTK tokenizers are available by downloading `punkt` and `punkt_tab`. Usage: `python scripts/install-nltk.py`.
+- `scripts/sqlite_recover.sh`: Non‑destructive SQLite recovery helper. See section “SQLite Recovery” for details. Usage: `scripts/sqlite_recover.sh [INPUT_DB] [OUTPUT_DB]`.
+- `scripts/crawl_robuste.sh`: Example robust loop with retries around `land crawl`. Edit the land name/parameters inside the script before use. Usage: `bash scripts/crawl_robuste.sh`.
+- `scripts/install_utils.py`: Shared helpers for the interactive installers (not meant to be run directly).
+
+---
 
 # Usage
 
