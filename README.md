@@ -146,16 +146,23 @@ python -m nltk.downloader punkt punkt_tab
 
 ## Helper Scripts
 
-- `scripts/docker-compose-setup.sh`: Docker Compose quick setup. Creates/backups `.env`, runs the interactive configurator, builds/starts services, initializes DB, verifies install, and optionally tests APIs/ML. Usage: `./scripts/docker-compose-setup.sh [basic|api|llm]`.
-- `scripts/install-docker-compose.py`: Interactive generator for `.env` used by Docker Compose. Configures timezone, data directory mapping, Playwright/ML build flags, SerpAPI/SEO Rank/OpenRouter keys, and embeddings/NLI options. Usage: `python scripts/install-docker-compose.py [--level basic|api|llm] [--output .env]`.
-- `scripts/install-basic.py`: Interactive setup for a minimal `settings.py` (paths, timeouts, parallelism, user‑agent, dynamic media, media analysis, default heuristics). Usage: `python scripts/install-basic.py [--output settings.py]`.
-- `scripts/install-api.py`: Configure external APIs (SerpAPI, SEO Rank, OpenRouter) and write to `settings.py` with environment overrides. Usage: `python scripts/install-api.py [--output settings.py]`.
-- `scripts/install-llm.py`: Configure embeddings provider, NLI models, and similarity backend; checks ML deps and sets retry/backoff parameters. Usage: `python scripts/install-llm.py [--output settings.py]`.
-- `scripts/test-apis.py`: Smoke‑test API connectivity. Usage: `python scripts/test-apis.py --all|--serpapi|--seorank|--openrouter [-v]` (requires a populated `settings.py`).
-- `scripts/install-nltk.py`: Ensure NLTK tokenizers are available by downloading `punkt` and `punkt_tab`. Usage: `python scripts/install-nltk.py`.
-- `scripts/sqlite_recover.sh`: Non‑destructive SQLite recovery helper. See section “SQLite Recovery” for details. Usage: `scripts/sqlite_recover.sh [INPUT_DB] [OUTPUT_DB]`.
-- `scripts/crawl_robuste.sh`: Example robust loop with retries around `land crawl`. Edit the land name/parameters inside the script before use. Usage: `bash scripts/crawl_robuste.sh`.
-- `scripts/install_utils.py`: Shared helpers for the interactive installers (not meant to be run directly).
+**Quick starts**
+- `scripts/docker-compose-setup.sh` — end-to-end Docker bootstrap (creates/backups `.env`, runs the wizard, builds, starts, initialises DB, and can smoke-test APIs/ML). Run `./scripts/docker-compose-setup.sh [basic|api|llm]`.
+
+**Interactive configuration wizards**
+- `scripts/install-docker-compose.py` — writes `.env` for Compose (timezone, host data path ↔ `/app/data`, Playwright/ML build flags, SerpAPI/SEO Rank/OpenRouter keys, embeddings/NLI defaults). Run `python scripts/install-docker-compose.py [--level basic|api|llm] [--output .env]`.
+- `scripts/install-basic.py` — generates a minimal `settings.py` (storage path, network timeouts, concurrency, user agent, dynamic media, media analysis, default heuristics). Run `python scripts/install-basic.py [--output settings.py]`.
+- `scripts/install-api.py` — records SerpAPI, SEO Rank, and OpenRouter credentials into `settings.py` (with env-var fallbacks). Run `python scripts/install-api.py [--output settings.py]`.
+- `scripts/install-llm.py` — configures embeddings provider, NLI models/backends, retry and batching parameters after checking ML dependencies. Run `python scripts/install-llm.py [--output settings.py]`.
+
+**Diagnostics & recovery**
+- `scripts/test-apis.py` — validates configured API keys; supports `--serpapi`, `--seorank`, `--openrouter`, or `--all` (add `-v` for verbose). Run `python scripts/test-apis.py ...`.
+- `scripts/sqlite_recover.sh` — non-destructive SQLite repair helper (see [SQLite Recovery](#sqlite-recovery)). Run `scripts/sqlite_recover.sh [INPUT_DB] [OUTPUT_DB]`.
+
+**Utilities**
+- `scripts/install-nltk.py` — downloads the `punkt` and `punkt_tab` tokenizers required by NLTK. Run `python scripts/install-nltk.py`.
+- `scripts/crawl_robuste.sh` — sample retry loop around `land crawl`; edit the land name/limits before running. Execute with `bash scripts/crawl_robuste.sh`.
+- `scripts/install_utils.py` — shared helper library for the interactive installers (not executable on its own).
 
 ---
 
@@ -182,10 +189,17 @@ docker exec -it mwi bash
 *   Arguments like `LAND_NAME` or `TERMS` are placeholders; replace them with your actual values.
 
 ```bash
-source .venv/bin/activate  # ou ton venv équivalent qui n'est pas nécessairement '.venv'
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+
+# Windows Command Prompt (cmd.exe)
+.\.venv\Scripts\activate.bat
 
 # Exécuter ensuite n’importe quelle commande applicative
-
+python mywi.py land list
 ```
 
 ## Land Management
