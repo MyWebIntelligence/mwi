@@ -158,6 +158,15 @@ Notes
     # Optional (only if you use embeddings/NLI locally):
     # python -m pip install -r requirements-ml.txt
     ```
+    Tip — NLTK on Windows/macOS:
+    - If your first `crawl` shows an NLTK error like `Resource punkt_tab not found` or an SSL certificate error (`SSL: CERTIFICATE_VERIFY_FAILED`), install the resources locally:
+      ```bash
+      python -m nltk.downloader punkt punkt_tab
+      ```
+    - If a certificate error appears:
+      - macOS: run your Python’s “Install Certificates.command” or set `SSL_CERT_FILE` to the path from `python -c "import certifi; print(certifi.where())"`.
+      - Windows: `pip install certifi` and re-run the downloader above.
+    - MyWI also caches NLTK data in `data/nltk_data` and will fall back to a simple tokenizer if downloads fail, so relevance still computes.
 
 4.  **Install Playwright Browsers:**
     This is required for dynamic media analysis (scraping JavaScript-heavy sites).

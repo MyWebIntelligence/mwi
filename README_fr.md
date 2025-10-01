@@ -258,6 +258,15 @@ Notes
    ```bash
    pip install -r requirements.txt
    ```
+   Astuce Windows/macOS — NLTK:
+   - Si votre premier `crawl` affiche une erreur NLTK (`punkt` / `punkt_tab` ou `SSL: CERTIFICATE_VERIFY_FAILED`), forcez l’installation locale des ressources:
+     ```bash
+     python -m nltk.downloader punkt punkt_tab
+     ```
+   - Si un message de certificat apparaît, installez/actualisez les certificats:
+     - macOS: exécuter `Install Certificates.command` (fourni par Python), ou définir `SSL_CERT_FILE` vers `python -c "import certifi; print(certifi.where())"`.
+     - Windows: `pip install certifi` puis relancer la commande ci‑dessus.
+   - MyWI met aussi en cache NLTK dans `data/nltk_data` et bascule sur un tokenizer de secours si le téléchargement échoue.
 3. Configurer `settings.py:data_location` vers un chemin absolu accessible.
 4. Initialiser la base :
    ```bash

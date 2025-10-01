@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && if [ "$WITH_ML" = "1" ]; then pip install --no-cache-dir -r requirements-ml.txt; fi
 
 # Pre-download NLTK data to avoid repeated downloads
-RUN python -c "import nltk; nltk.download('punkt')"
+RUN python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 
 COPY . .
 

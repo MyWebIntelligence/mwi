@@ -1,6 +1,7 @@
 """
 Core functions
 """
+import os
 import asyncio
 import calendar
 import json
@@ -32,10 +33,52 @@ import settings
 from . import model
 from .export import Export
 
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
+def _ensure_nltk_tokenizers() -> bool:
+    """Ensure required NLTK tokenizers are available, with resilient SSL and local cache.
+
+    Returns True if tokenizers are found or downloaded, False otherwise.
+    """
+    # Prefer caching into the project data folder
+    try:
+        nltk_dir = path.join(getattr(settings, 'data_location', 'data'), 'nltk_data')
+        os.makedirs(nltk_dir, exist_ok=True)
+        if nltk_dir not in nltk.data.path:
+            nltk.data.path.append(nltk_dir)
+    except Exception:
+        pass
+
+    # Harden SSL on platforms with broken cert stores (notably some Windows/macOS setups)
+    try:
+        import ssl  # type: ignore
+        import certifi  # type: ignore
+        os.environ.setdefault('SSL_CERT_FILE', certifi.where())
+        # Ensure urllib uses certifi's CA bundle
+        ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())  # type: ignore[attr-defined]
+    except Exception:
+        # If certifi/ssl tweak fails, we still attempt standard downloads
+        pass
+
+    ok = True
+    for resource in ('punkt', 'punkt_tab'):
+        try:
+            nltk.data.find(f'tokenizers/{resource}')
+        except LookupError:
+            try:
+                nltk.download(resource, quiet=True)
+            except Exception:
+                ok = False
+    return ok
+
+_NLTK_OK = _ensure_nltk_tokenizers()
+if not _NLTK_OK:
+    print("Warning: NLTK 'punkt'/'punkt_tab' not available; using a simple tokenizer fallback.")
+
+def _simple_word_tokenize(text: str) -> List[str]:
+    """Very small fallback tokenizer for French when NLTK data is unavailable."""
+    if not isinstance(text, str):
+        text = str(text)
+    # Keep only letter sequences (incl. basic Latin-1 accents)
+    return re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ]+", text.lower())
 
 
 async def extract_dynamic_medias(url: str, expression: model.Expression) -> list:
@@ -2112,7 +2155,11 @@ def expression_relevance(dictionary, expression: model.Expression) -> int:
     def get_relevance(text, weight) -> list:
         if not isinstance(text, str): # Ensure text is a string
             text = str(text)
-        stems = [stem_word(w) for w in word_tokenize(text, language='french')]
+        if _NLTK_OK:
+            tokens = word_tokenize(text, language='french')
+        else:
+            tokens = _simple_word_tokenize(text)
+        stems = [stem_word(w) for w in tokens]
         stemmed_text = " ".join(stems)
         return [sum(weight for _ in re.finditer(r'\b%s\b' % re.escape(lemma), stemmed_text)) for lemma in lemmas]
 
