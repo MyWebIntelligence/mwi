@@ -63,16 +63,24 @@ ls # check 'data' dir
 ```
 
 ### Step 1 – Prepare the configuration files
-1. Copy `.env.example` to `.env`.
+1. Copy `.env.example` to `.env` (optional).
    ```bash
    cp .env.example .env
    ```
-   - Keep the default `HOST_DATA_DIR=./data` to store the database and exports inside the repository, or replace it with an absolute path (for example `HOST_DATA_DIR=/Users/you/mywi_data` on macOS/Linux or `HOST_DATA_DIR=C:/Users/you/mywi_data` on Windows).
+   - Note: `.env` is a hidden file on many systems. You can skip this step; Docker Compose has safe defaults. If you skip it, just ensure the host data folder exists (see next step).
+   - If you do use `.env`, keep the default `HOST_DATA_DIR=./data` to store the database and exports inside the repository, or replace it with an absolute path (for example `HOST_DATA_DIR=/Users/you/mywi_data` on macOS/Linux or `HOST_DATA_DIR=C:/Users/you/mywi_data` on Windows).
 2. Copy the sample settings file.
    ```bash
    cp settings-example.py settings.py
    ```
    - You can add API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) in `settings.py`. Alternatively, add them to `.env` as environment variables like `MWI_SERPAPI_API_KEY=...`; Docker Compose automatically passes them to the container.
+3. Choose or create your host data folder (if you skipped `.env`, defaults apply):
+   ```bash
+   mkdir -p ./data
+   ```
+   - Without `.env`, Docker Compose maps `./data` on the host to `/app/data` in the container. No extra configuration needed.
+   - If you prefer a different host folder, either set `HOST_DATA_DIR` in `.env` or edit the `volumes:` mapping in `docker-compose.yml`.
+   - If you also plan local (non-Docker) runs, you can set an absolute path in `settings.py:data_location`; in Docker, the default works because the app resolves `data` to `/app/data`.
 
 ### Step 2 – Build and start the services
 ```bash

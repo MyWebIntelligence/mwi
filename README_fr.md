@@ -168,16 +168,24 @@ Docker Compose est la manière la plus simple d’exécuter MyWI : tout reste i
 - Installer [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Compose est inclus) et le lancer avant de poursuivre.
 
 ### Étape 1 – Préparer les fichiers de configuration
-1. Copier `.env.example` vers `.env`.
+1. Copier `.env.example` vers `.env` (optionnel).
    ```bash
    cp .env.example .env
    ```
-   - Conserver `HOST_DATA_DIR=./data` pour stocker la base et les exports dans le dépôt, ou remplacer par un chemin absolu (ex. `HOST_DATA_DIR=/Users/vous/mywi_data` sous macOS/Linux ou `HOST_DATA_DIR=C:/Users/vous/mywi_data` sous Windows).
+   - Remarque : `.env` est un fichier caché sur beaucoup de systèmes. Vous pouvez ignorer cette étape ; Docker Compose a des valeurs par défaut sûres. Si vous l’ignorez, assurez‑vous simplement que le dossier de données existe (étape suivante).
+   - Si vous utilisez `.env`, conservez `HOST_DATA_DIR=./data` pour stocker la base et les exports dans le dépôt, ou remplacez par un chemin absolu (ex. `HOST_DATA_DIR=/Users/vous/mywi_data` sous macOS/Linux ou `HOST_DATA_DIR=C:/Users/vous/mywi_data` sous Windows).
 2. Copier le fichier d’exemple des réglages.
    ```bash
    cp settings-example.py settings.py
    ```
    - Ajouter vos clés API (SerpAPI, SEO Rank, OpenRouter, embeddings…) dans `settings.py`, ou bien les renseigner dans `.env` via des variables comme `MWI_SERPAPI_API_KEY=...` qui seront transmises automatiquement au conteneur.
+3. Choisir ou créer le dossier de données sur l’hôte (si vous avez ignoré `.env`, les valeurs par défaut s’appliquent) :
+   ```bash
+   mkdir -p ./data
+   ```
+   - Sans `.env`, Docker Compose mappe `./data` (hôte) vers `/app/data` (conteneur). Aucune configuration supplémentaire n’est nécessaire.
+   - Si vous préférez un autre dossier hôte, définissez `HOST_DATA_DIR` dans `.env` ou modifiez le mapping `volumes:` dans `docker-compose.yml`.
+   - Si vous comptez aussi exécuter en local (hors Docker), vous pouvez mettre un chemin absolu dans `settings.py:data_location`. En Docker, la valeur par défaut fonctionne car l’app résout `data` vers `/app/data`.
 
 ### Étape 2 – Construire et démarrer les services
 ```bash
