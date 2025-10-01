@@ -168,20 +168,27 @@ Your data stays in the host folder you mounted in Step 5. Re-running the contain
     mkdir data
     ```
 
-2.  **Create and Activate Virtual Environment (macOS / Linux):**
+2.  **Create and Activate Virtual Environment:**
     Modern Python versions come with `venv` built-in.
-    ```bash
-    python3 -m venv .venv
-    source .venv/bin/activate
-    ```
-    *(Note: If `python3` doesn't work, try `python`)*
+    - macOS/Linux:
+      ```bash
+      python3 -m venv .venv
+      source .venv/bin/activate
+      ```
+    - Windows (PowerShell):
+      ```bash
+      python -m venv .venv
+      .\.venv\Scripts\activate
+      ```
+    *(Note: If `python3` doesn't work, try `python`.)*
 
 3.  **Install Dependencies:**
-    This step installs the project itself in "editable" mode, which is necessary to make imports like `from mwi.core...` work correctly.
+    Use a clean, pip‑only environment and install base deps first. ML extras are optional.
     ```bash
-    pip install -e .
-    pip install -r requirements.txt
-    pip install -r requirements-ml.txt
+    python -m pip install -U pip setuptools wheel
+    python -m pip install -r requirements.txt
+    # Optional (only if you use embeddings/NLI locally):
+    # python -m pip install -r requirements-ml.txt
     ```
 
 4.  **Install Playwright Browsers:**
@@ -197,12 +204,7 @@ Your data stays in the host folder you mounted in Step 5. Re-running the contain
     ```
     This command should now run without any `ImportError`.
 
-    *   **Windows:**
-        ```bash
-        python -m venv venv
-        .\venv\Scripts\activate
-        ```
-    Your command prompt should now be prefixed with `(venv)`.
+    
 
 6.  **Create `settings.py` and configure paths/API keys:**
     ```bash
@@ -219,12 +221,12 @@ Your data stays in the host folder you mounted in Step 5. Re-running the contain
 
 7.  **Setup Database:**
     ```bash
-    (venv) python mywi.py db setup
+    python mywi.py db setup
     ```
     This command creates the database file in the `data_location` you specified. Warning: it will destroy any previous data if the database file already exists from a prior setup.
 
 
-You are now ready to use MyWI commands as described in the [Usage](#usage) section using `(venv) python mywi.py ...`.
+You are now ready to use MyWI commands as described in the [Usage](#usage) section using `python mywi.py ...`.
 
 # Usage
 
@@ -1010,7 +1012,7 @@ When pulling a newer version of MyWI, make sure your existing database has the l
 python mywi.py db migrate
 ```
 
-This command is idempotent: it inspects `data/mwi.db` (or the location specified via `MWI_DATA_LOCATION`) and adds any missing fields. Run it after every upgrade or before sharing a database. For safety, back up the file first:
+This command is idempotent: it inspects `data/mwi.db` (or the location specified via `MYWI_DATA_DIR`) and adds any missing fields. Run it after every upgrade or before sharing a database. For safety, back up the file first:
 
 ```bash
 cp data/mwi.db data/mwi.db.bak_$(date +%Y%m%d_%H%M%S)
@@ -1039,7 +1041,7 @@ Validate the repaired DB with MyWI without replacing the original:
 ```bash
 mkdir -p data/test-repaired
 cp data/mwi_repaired.db data/test-repaired/mwi.db
-MWI_DATA_LOCATION="$PWD/data/test-repaired" venv/bin/python mywi.py land list
+MYWI_DATA_DIR="$PWD/data/test-repaired" python mywi.py land list
 ```
 
 If everything looks good, adopt the repaired DB (after a manual backup):
@@ -1048,7 +1050,7 @@ cp data/mwi.db data/mwi.db.bak_$(date +%Y%m%d_%H%M%S)
 mv data/mwi_repaired.db data/mwi.db
 ```
 
-Note: You can temporarily point the app to a different data directory using the `MWI_DATA_LOCATION` environment variable; it overrides `settings.py:data_location` for that session.
+Note: You can temporarily point the app to a different data directory using the `MYWI_DATA_DIR` environment variable; it overrides `settings.py:data_location` for that session.
 
 # For Developpers
 

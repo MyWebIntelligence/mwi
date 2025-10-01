@@ -288,8 +288,8 @@ Vos données demeurent dans le dossier monté à l’étape 5. Relancer le cont
    ```bash
    git clone https://github.com/MyWebIntelligence/MyWebIntelligencePython.git
    cd MyWebIntelligencePython
-   python -m venv venv
-   source venv/bin/activate  # Windows : .\venv\Scripts\activate
+   python3 -m venv .venv
+   source .venv/bin/activate  # Windows : .\.venv\Scripts\activate
    ```
 2. Installer les dépendances :
    ```bash
@@ -637,7 +637,7 @@ Valider sans écraser la base d’origine :
 ```bash
 mkdir -p data/test-repaired
 cp data/mwi_repaired.db data/test-repaired/mwi.db
-MWI_DATA_LOCATION="$PWD/data/test-repaired" venv/bin/python mywi.py land list
+MYWI_DATA_DIR="$PWD/data/test-repaired" python mywi.py land list
 ```
 
 Adopter la base réparée (après sauvegarde manuelle) :
@@ -646,7 +646,7 @@ cp data/mwi.db data/mwi.db.bak_$(date +%Y%m%d_%H%M%S)
 mv data/mwi_repaired.db data/mwi.db
 ```
 
-Astuce : `MWI_DATA_LOCATION` permet de pointer temporairement vers un autre dossier de données sans modifier `settings.py:data_location`.
+Astuce : `MYWI_DATA_DIR` permet de pointer temporairement vers un autre dossier de données sans modifier `settings.py:data_location`.
 
 ---
 

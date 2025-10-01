@@ -85,6 +85,5 @@ echo "
 Next steps:
   1) Inspect $LOG_DIR/integrity_rebuilt.out for 'ok'.
   2) Confirm tables exist (Land, Domain, Expression, ExpressionLink, Word, LandDictionary, Media, Tag, TaggedContent).
-  3) Test with the app by pointing MWI_DATA_LOCATION to a folder where this repaired file is named 'mwi.db'.
+  3) Test with the app by pointing MYWI_DATA_DIR to a folder where this repaired file is named 'mwi.db'.
 "
-
