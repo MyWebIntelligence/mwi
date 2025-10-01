@@ -20,6 +20,8 @@ Usage:
 
 import sys
 import argparse
+import os
+import re
 from pathlib import Path
 
 # Add parent directory to path to import install_utils
@@ -104,6 +106,9 @@ def main():
         # Write .env file
         write_env_file(env_config, args.output)
         print(success(f"Configuration saved to {args.output}"))
+
+        # Ensure settings.py uses container path (Docker mount friendly)
+        update_settings_data_location(env_config.get('MYWI_DATA_DIR', '/app/data'))
 
         # Print next steps
         print_next_steps(level)
@@ -541,6 +546,36 @@ def write_env_file(config: dict, file_path: str):
         f.write(f"MWI_SIMILARITY_TOP_K={config.get('MWI_SIMILARITY_TOP_K', '50')}\n")
         f.write(f"MWI_NLI_ENTAILMENT_THRESHOLD={config.get('MWI_NLI_ENTAILMENT_THRESHOLD', '0.8')}\n")
         f.write(f"MWI_NLI_CONTRADICTION_THRESHOLD={config.get('MWI_NLI_CONTRADICTION_THRESHOLD', '0.8')}\n")
+
+
+def update_settings_data_location(container_path: str = '/app/data'):
+    """Ensure settings.py defers to MYWI_DATA_DIR (required for Docker mounts)."""
+    settings_path = Path('settings.py')
+    if not settings_path.exists():
+        return
+
+    try:
+        content = settings_path.read_text()
+    except OSError:
+        return
+
+    target_line = 'data_location = os.getenv("MYWI_DATA_DIR", "data")'
+
+    if target_line in content:
+        return
+
+    pattern = re.compile(r'^data_location\s*=.*$', re.MULTILINE)
+    new_content, count = pattern.subn(target_line, content, count=1)
+
+    if count == 0:
+        return
+
+    try:
+        settings_path.write_text(new_content)
+    except OSError:
+        return
+
+    print(info('Updated settings.py:data_location to rely on MYWI_DATA_DIR (Docker-safe).'))
 
 
 def print_next_steps(level: str):
