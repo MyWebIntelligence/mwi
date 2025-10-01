@@ -229,66 +229,21 @@ docker compose down -v       # arrêter et supprimer le volume Docker (DETRUIT l
 - Sur la machine hôte : le dossier indiqué par `HOST_DATA_DIR` (défaut : `./data` dans le dépôt).
 - Dans le conteneur : `/app/data`. `settings.py` pointe déjà vers cet emplacement, aucune configuration supplémentaire n’est nécessaire.
 
-## Utiliser Docker (manuel)
+## Annexe — Docker (manuel, avancé)
 
-Choisissez cette option si vous préférez saisir vous-même les commandes Docker plutôt que d’utiliser Docker Compose.
+À utiliser quand Compose n’est pas disponible, pour du one‑shot, ou du débogage bas niveau.
 
-### Prérequis
-- Installer [Docker Desktop](https://www.docker.com/products/docker-desktop/) ou Docker Engine et vérifier qu’il s’exécute.
+Étapes
+- Construire l’image : `docker build -t mwi:latest .`
+- Créer le dossier hôte : `mkdir -p ~/mywi_data` (ou un autre chemin)
+- Lancer le conteneur : `docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest`
+- Initialiser la base (première fois) : `docker exec -it mwi python mywi.py db setup`
+- Exécuter des commandes : `docker exec -it mwi python mywi.py land list`
+- Gérer le conteneur : `docker stop mwi` · `docker start mwi` · `docker rm mwi`
 
-### Étape 1 – Cloner le dépôt
-```bash
-git clone https://github.com/MyWebIntelligence/MyWebIntelligencePython.git
-cd MyWebIntelligencePython
-```
-
-### Étape 2 – Préparer le fichier `settings.py`
-```bash
-cp settings-example.py settings.py
-```
-- Stocker vos clés API (SerpAPI, SEO Rank, OpenRouter, embeddings…) dans `settings.py` ou prévoir de les passer au conteneur via `-e MWI_SERPAPI_API_KEY=...`.
-- La valeur par défaut `data_location = "data"` correspondra au point de montage `/app/data` utilisé ci-dessous.
-
-### Étape 3 – Créer un dossier persistant sur l’hôte
-```bash
-mkdir -p ~/mywi_data
-```
-- Windows (PowerShell) : `New-Item -ItemType Directory -Path "C:/Users/vous/mywi_data"`
-
-### Étape 4 – Construire l’image Docker
-```bash
-docker build -t mwi:latest .
-```
-- Pour inclure les dépendances ML (FAISS + transformers), exécuter `MYWI_WITH_ML=1 docker build -t mwi:latest .`.
-
-### Étape 5 – Démarrer le conteneur
-Remplacer le chemin hôte par le dossier créé à l’étape précédente.
-```bash
-docker run -dit --name mwi -v /chemin/vers/vos/donnees:/app/data mwi:latest
-```
-- macOS/Linux : `docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest`
-- Windows : `docker run -dit --name mwi -v C:/Users/vous/mywi_data:/app/data mwi:latest`
-- Ajouter des variables d’environnement (`-e MWI_SERPAPI_API_KEY=...`) si vous ne souhaitez pas modifier `settings.py`.
-
-### Étape 6 – Initialiser la base (première fois uniquement)
-```bash
-docker exec -it mwi python mywi.py db setup
-```
-
-### Étape 7 – Utiliser la CLI depuis le conteneur
-```bash
-docker exec -it mwi python mywi.py land list
-```
-Exécuter ensuite toutes les commandes sous la forme `docker exec -it mwi python mywi.py ...`. Tapez `exit` pour quitter un shell ouvert avec `docker exec -it mwi bash`.
-
-### Gérer le conteneur
-```bash
-docker stop mwi         # arrêter le conteneur
-docker start mwi        # le relancer plus tard
-docker rm mwi           # supprimer le conteneur (les données restent sur l’hôte)
-```
-
-Vos données demeurent dans le dossier monté à l’étape 5. Relancer le conteneur avec la même option `-v` réutilise la base existante.
+Notes
+- Passer les secrets/clés via `-e MWI_*` ou les définir dans `settings.py`.
+- Par défaut, `settings.py:data_location = "data"` se résout vers `/app/data` dans le conteneur.
 
 ## Installation locale
 

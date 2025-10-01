@@ -104,61 +104,21 @@ docker compose down -v       # stop and delete the Docker volume (DESTROYS the d
 - On your computer: the folder defined by `HOST_DATA_DIR` (default `./data` in the repository).
 - Inside the container: `/app/data`. `settings.py` already points to this location, so no extra configuration is needed.
 
-## Using Docker (manual)
+## Annex — Docker (manual, advanced)
 
-Use this path if you prefer plain Docker commands instead of Docker Compose.
+Use plain Docker when Compose isn’t available or for quick one‑off runs.
 
-### Prerequisites
-- Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine and make sure it is running.
+Steps
+- Build image: `docker build -t mwi:latest .`
+- Create host data folder: `mkdir -p ~/mywi_data` (or any path)
+- Run container: `docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest`
+- Init DB (first run): `docker exec -it mwi python mywi.py db setup`
+- Run commands: `docker exec -it mwi python mywi.py land list`
+- Manage: `docker stop mwi` · `docker start mwi` · `docker rm mwi`
 
-### Step 1 – Clone the project
-```bash
-git clone https://github.com/MyWebIntelligence/mwi.git
-cd mwi
-mkdir data
-ls # check 'data' dir
-```
-
-### Step 2 – Prepare the settings file
-```bash
-cp settings-example.py settings.py
-```
-- Store your API keys (SerpAPI, SEO Rank, OpenRouter, embeddings…) in `settings.py` or plan to provide them as environment variables when starting the container (for example `-e MWI_SERPAPI_API_KEY=...`).
-- The default `data_location = "data"` already matches the mount point we will use (`/app/data`).
-
-### Step 3 – Create a folder for persistent data
-```bash
-mkdir -p ~/mywi_data
-```
-- Windows (PowerShell): `New-Item -ItemType Directory -Path "C:/Users/you/mywi_data"`
-
-### Step 4 – Build the Docker image
-```bash
-docker build -t mwi:latest .
-```
-- To include ML dependencies (FAISS + transformers) run `MYWI_WITH_ML=1 docker build -t mwi:latest .` instead.
-
-### Step 5 – Start the container
-Replace the host path with the folder you created in Step 3.
-```bash
-docker run -dit --name mwi -v /path/to/your/data:/app/data mwi:latest
-```
-- macOS/Linux example: `docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest`
-- Windows example: `docker run -dit --name mwi -v C:/Users/you/mywi_data:/app/data mwi:latest`
-- Add `-e MWI_SERPAPI_API_KEY=...` (and similar) if you prefer environment variables to editing `settings.py`.
-
-### Step 6 – Initialize the database (first run only)
-```bash
-docker exec -it mwi python mywi.py db setup
-```
-### Manage the container
-```bash
-docker stop mwi         # stop the container
-docker start mwi        # start it again later
-docker rm mwi           # remove the container (keeps your data because it lives on the host)
-```
-
-Your data stays in the host folder you mounted in Step 5. Re-running the container with the same `-v` option reuses the existing database.
+Notes
+- Pass secrets/keys with `-e MWI_*` flags, or set them in `settings.py`.
+- Default `settings.py:data_location = "data"` resolves to `/app/data` in the container.
 
 ## Local Development Setup
 
