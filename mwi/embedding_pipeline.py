@@ -16,16 +16,31 @@ from . import model
 
 
 def _clean_text(s: str) -> str:
+    """Clean and normalize text by collapsing whitespace.
+
+    Args:
+        s: Input text string to clean.
+
+    Returns:
+        Normalized string with collapsed whitespace and trimmed edges.
+    """
     return re.sub(r"\s+", " ", (s or "").strip())
 
 
 def split_into_paragraphs(expression: model.Expression) -> List[str]:
     """Split expression.readable into normalized paragraphs.
 
+    Args:
+        expression: Expression object containing readable text content.
+
+    Returns:
+        List of normalized paragraph strings that meet length criteria.
+
     Rules:
-    - Split on blank lines (two or more newlines)
-    - Trim whitespace, collapse internal spaces
-    - Filter by min/max length from settings
+        - Split on blank lines (two or more newlines)
+        - Trim whitespace, collapse internal spaces
+        - Filter by min/max length from settings
+        - Falls back to whole text if no paragraphs meet criteria
     """
     if not expression.readable:
         return []
@@ -55,8 +70,17 @@ def split_into_paragraphs(expression: model.Expression) -> List[str]:
 
 
 def _fake_embed(texts: List[str]) -> List[List[float]]:
-    """Deterministic local embedding for testing/offline mode.
-    Maps characters to buckets and normalizes.
+    """Generate deterministic local embeddings for testing/offline mode.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of normalized embedding vectors (64 dimensions).
+
+    Note:
+        Maps characters to hash-based buckets and normalizes to unit length.
+        Deterministic for testing purposes.
     """
     dim = 64
     vecs: List[List[float]] = []
@@ -73,7 +97,19 @@ def _fake_embed(texts: List[str]) -> List[List[float]]:
 
 def _http_embed(texts: List[str]) -> List[List[float]]:
     """Call a generic HTTP embedding API.
-    Expects JSON response {"data": [{"embedding": [...]}, ...]}.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of embedding vectors from the API.
+
+    Raises:
+        RuntimeError: If embed_api_url is not configured.
+        requests.HTTPError: If the API request fails.
+
+    Note:
+        Expects JSON response: {"data": [{"embedding": [...]}, ...]}.
     """
     if not settings.embed_api_url:
         raise RuntimeError("embed_api_url is not configured")
@@ -95,6 +131,17 @@ def _http_embed(texts: List[str]) -> List[List[float]]:
 
 
 def _openai_embed(texts: List[str]) -> List[List[float]]:
+    """Generate embeddings using OpenAI API.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of embedding vectors from OpenAI.
+
+    Raises:
+        requests.HTTPError: If the API request fails.
+    """
     base = (settings.embed_openai_base_url or "https://api.openai.com/v1").rstrip("/")
     url = f"{base}/embeddings"
     headers = {
@@ -109,6 +156,17 @@ def _openai_embed(texts: List[str]) -> List[List[float]]:
 
 
 def _mistral_embed(texts: List[str]) -> List[List[float]]:
+    """Generate embeddings using Mistral AI API.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of embedding vectors from Mistral AI.
+
+    Raises:
+        requests.HTTPError: If the API request fails.
+    """
     base = (settings.embed_mistral_base_url or "https://api.mistral.ai/v1").rstrip("/")
     url = f"{base}/embeddings"
     headers = {
@@ -123,6 +181,20 @@ def _mistral_embed(texts: List[str]) -> List[List[float]]:
 
 
 def _gemini_embed(texts: List[str]) -> List[List[float]]:
+    """Generate embeddings using Google Gemini API.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of embedding vectors from Gemini.
+
+    Raises:
+        requests.HTTPError: If the API request fails.
+
+    Note:
+        Uses batchEmbedContents endpoint for multiple inputs.
+    """
     # Use batchEmbedContents for multiple inputs
     base = (settings.embed_gemini_base_url or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     model_name = settings.embed_model_name
@@ -145,6 +217,20 @@ def _gemini_embed(texts: List[str]) -> List[List[float]]:
 
 
 def _huggingface_embed(texts: List[str]) -> List[List[float]]:
+    """Generate embeddings using HuggingFace Inference API.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of embedding vectors from HuggingFace.
+
+    Raises:
+        requests.HTTPError: If the API request fails.
+
+    Note:
+        Normalizes various response formats from HuggingFace API.
+    """
     base = (settings.embed_hf_base_url or "https://api-inference.huggingface.co/models").rstrip("/")
     model_name = settings.embed_model_name
     url = f"{base}/{model_name}"
@@ -168,6 +254,20 @@ def _huggingface_embed(texts: List[str]) -> List[List[float]]:
 
 
 def _ollama_embed(texts: List[str]) -> List[List[float]]:
+    """Generate embeddings using Ollama local API.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of embedding vectors from Ollama.
+
+    Raises:
+        requests.HTTPError: If the API request fails.
+
+    Note:
+        Processes texts sequentially as Ollama API accepts one text per call.
+    """
     base = (settings.embed_ollama_base_url or "http://localhost:11434").rstrip("/")
     url = f"{base}/api/embeddings"
     out: List[List[float]] = []
@@ -181,6 +281,19 @@ def _ollama_embed(texts: List[str]) -> List[List[float]]:
 
 
 def _embed_texts(texts: List[str]) -> List[List[float]]:
+    """Route embedding requests to the configured provider.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of embedding vectors from the configured provider.
+
+    Note:
+        Provider is determined by settings.embed_provider.
+        Supported providers: fake, http, openai, mistral, gemini,
+        huggingface, ollama. Falls back to fake for unknown providers.
+    """
     provider = (settings.embed_provider or 'fake').lower()
     if provider == 'fake':
         return _fake_embed(texts)
@@ -202,9 +315,18 @@ def _embed_texts(texts: List[str]) -> List[List[float]]:
 
 
 def generate_embeddings_for_paragraphs(land: model.Land, limit_expressions: int | None = None) -> Tuple[int, int]:
-    """Create Paragraph rows from readable and generate embeddings.
+    """Create Paragraph rows from readable content and generate embeddings.
 
-    Returns (paragraphs_created, embeddings_created).
+    Args:
+        land: Land object containing expressions to process.
+        limit_expressions: Optional limit on number of expressions to process.
+
+    Returns:
+        Tuple of (paragraphs_created, embeddings_created) counts.
+
+    Note:
+        Creates Paragraph entries with text hash deduplication, then
+        generates embeddings for paragraphs missing them in batches.
     """
     # Select expressions of the land with readable content
     expr_query = model.Expression.select().where(
@@ -261,6 +383,18 @@ def generate_embeddings_for_paragraphs(land: model.Land, limit_expressions: int 
 
 
 def _persist_embeddings(ids: List[int], texts: List[str]) -> int:
+    """Generate and persist embeddings for paragraph batch.
+
+    Args:
+        ids: List of paragraph IDs.
+        texts: List of corresponding text strings.
+
+    Returns:
+        Number of embedding records created.
+
+    Note:
+        Computes L2 norm and stores embeddings as JSON in database.
+    """
     vecs = _embed_texts(texts)
     created = 0
     with model.DB.atomic():
@@ -280,6 +414,18 @@ def _persist_embeddings(ids: List[int], texts: List[str]) -> int:
 
 
 def _cosine(a: List[float], b: List[float]) -> float:
+    """Compute cosine similarity between two vectors.
+
+    Args:
+        a: First embedding vector.
+        b: Second embedding vector.
+
+    Returns:
+        Cosine similarity score between -1 and 1.
+
+    Note:
+        Normalizes vectors during computation if not already normalized.
+    """
     # a and b expected normalized or will be normalized during compute
     dot = sum(x * y for x, y in zip(a, b))
     # in case they are not normalized
@@ -299,7 +445,21 @@ def compute_paragraph_similarities(
 ) -> int:
     """Compute pairwise cosine similarities and store pairs above threshold.
 
-    Returns number of similarity pairs inserted.
+    Args:
+        land: Land object containing paragraphs to compare.
+        threshold: Minimum similarity score to store (default from settings).
+        method: Similarity computation method (default from settings).
+        top_k: Optional limit on similarity pairs per source paragraph.
+        lsh_bits: Number of LSH bits for cosine_lsh method.
+        minrel: Minimum expression relevance filter.
+        max_pairs: Maximum total similarity pairs to compute.
+
+    Returns:
+        Number of similarity pairs inserted.
+
+    Note:
+        Clears existing similarities for the land before computing.
+        Supports 'cosine' and 'cosine_lsh' methods.
     """
     thr = float(threshold if threshold is not None else settings.embed_similarity_threshold)
     meth = (method or settings.embed_similarity_method or 'cosine')
@@ -346,6 +506,18 @@ def _compute_similarities_bruteforce(
     data: List[Tuple[int, int, List[float]]], thr: float, meth: str,
     top_k: int | None, max_pairs: int | None
 ) -> int:
+    """Compute similarities using brute-force pairwise comparison.
+
+    Args:
+        data: List of (paragraph_id, expression_id, embedding_vector) tuples.
+        thr: Minimum similarity threshold.
+        meth: Method name to store.
+        top_k: Optional limit on pairs per source paragraph.
+        max_pairs: Optional maximum total pairs limit.
+
+    Returns:
+        Number of similarity pairs created.
+    """
     n = len(data)
     count = 0
     batch_inserts = []
@@ -387,6 +559,23 @@ def _compute_similarities_lsh(
     data: List[Tuple[int, int, List[float]]], thr: float, meth: str,
     top_k: int | None, lsh_bits: int, max_pairs: int | None
 ) -> int:
+    """Compute similarities using LSH (Locality-Sensitive Hashing).
+
+    Args:
+        data: List of (paragraph_id, expression_id, embedding_vector) tuples.
+        thr: Minimum similarity threshold.
+        meth: Method name to store.
+        top_k: Optional limit on pairs per source paragraph.
+        lsh_bits: Number of hash bits for bucketization.
+        max_pairs: Optional maximum total pairs limit.
+
+    Returns:
+        Number of similarity pairs created.
+
+    Note:
+        Uses random hyperplanes for LSH signatures, then performs
+        brute-force comparison within each bucket.
+    """
     import random
     random.seed(42)
     if not data:
@@ -454,6 +643,15 @@ def _compute_similarities_lsh(
 
 
 def _flush_similarity_inserts(rows: List[Dict]):
+    """Persist similarity pairs to database with batch insert.
+
+    Args:
+        rows: List of dictionaries containing similarity pair data.
+
+    Note:
+        Attempts batch insert, falls back to individual inserts on error.
+        Silently ignores duplicate errors.
+    """
     if not rows:
         return
     with model.DB.atomic():

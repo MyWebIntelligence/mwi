@@ -1,6 +1,19 @@
-"""
-Export module
-Contains custom SQL to be exported in specified file formats
+"""Export module for MyWebIntelligence data export functionality.
+
+This module provides the Export class for exporting research land data to various
+formats including CSV, GEXF (graph exchange format), and ZIP archives. It supports
+multiple export types for different data perspectives:
+
+- Page exports: Expression-level data with metadata and SEO rank information
+- Node exports: Domain-level aggregated data
+- Media exports: Media links associated with expressions
+- Tag exports: Hierarchical tag data in matrix or content format
+- Corpus exports: Text corpora with Dublin Core metadata
+- Pseudolink exports: Semantic similarity relationships at paragraph, page, and domain levels
+- Graph exports: GEXF network graphs for visualization tools like Gephi
+
+All exports support filtering by minimum relevance threshold and are optimized
+for large-scale data analysis in digital humanities research.
 """
 
 import csv
@@ -15,8 +28,18 @@ from . import model
 
 
 class Export:
-    """
-    Export class
+    """Export class for generating various data export formats from land data.
+
+    This class handles exporting research land data to multiple formats including
+    CSV, GEXF (graph format), and ZIP archives with text corpora. It supports
+    filtering by relevance threshold and includes specialized exports for pages,
+    domains, media, tags, and semantic links.
+
+    Attributes:
+        gexf_ns: XML namespace mappings for GEXF format.
+        type: Export type identifier (e.g., 'pagecsv', 'nodegexf').
+        land: Land model instance for the export.
+        relevance: Minimum relevance score threshold for filtering expressions.
     """
     gexf_ns = {None: 'http://www.gexf.net/1.2draft', 'viz': 'http://www.gexf.net/1.1draft/viz'}
     type = None
@@ -24,22 +47,34 @@ class Export:
     relevance = 1
 
     def __init__(self, export_type: str, land: model.Land, minimum_relevance: int):
-        """
-        :param export_type:
-        :param land:
-        :param minimum_relevance:
-        :return:
+        """Initialize an Export instance with specified parameters.
+
+        Args:
+            export_type: The format type for export (e.g., 'pagecsv', 'gexf', 'corpus').
+            land: The Land model instance representing the research project.
+            minimum_relevance: Minimum relevance score threshold for including expressions.
+
+        Notes:
+            The export_type determines which write method will be called.
+            Only expressions with relevance >= minimum_relevance are included.
         """
         self.type = export_type
         self.land = land
         self.relevance = minimum_relevance
 
     def write(self, export_type: str, filename):
-        """
-        Proxy method to all format writers
-        :param export_type:
-        :param filename:
-        :return:
+        """Proxy method that dispatches to appropriate format-specific writer.
+
+        Args:
+            export_type: The export format type (e.g., 'pagecsv', 'nodegexf', 'corpus').
+            filename: Base filename without extension (extension added automatically).
+
+        Returns:
+            int: Number of records/items written to the output file.
+
+        Notes:
+            Automatically appends appropriate file extensions (.csv, .gexf, or .zip).
+            Dynamically calls the corresponding write_{export_type} method.
         """
         call_write = getattr(self, 'write_' + export_type)
         if export_type.endswith('csv'):
@@ -51,20 +86,35 @@ class Export:
         return call_write(filename)
 
     def get_sql_cursor(self, sql, column_map):
-        """
-        Build SQL query to execution, returning an iterable cursor
-        :param sql:
-        :param column_map:
-        :return:
+        """Build and execute SQL query with column mapping.
+
+        Args:
+            sql: SQL query template with {} placeholder for column definitions.
+            column_map: Dictionary mapping output column names to SQL expressions.
+
+        Returns:
+            Database cursor object for iterating over query results.
+
+        Notes:
+            Automatically injects land_id and minimum relevance parameters.
+            Formats column_map as "sql_expression AS output_name" clauses.
         """
         cols = ",\n".join(["{1} AS {0}".format(*i) for i in column_map.items()])
         return model.DB.execute_sql(sql.format(cols), (self.land.get_id(), self.relevance))
 
     def write_pagecsv(self, filename) -> int:
-        """
-        Write CSV file
-        :param filename:
-        :return:
+        """Write page data to CSV file with SEO rank metadata.
+
+        Args:
+            filename: Path to output CSV file.
+
+        Returns:
+            int: Number of expression records written.
+
+        Notes:
+            Includes expression metadata, domain information, tags, and SEO rank data.
+            SEO rank payload is parsed from JSON and flattened into additional columns.
+            Missing or unknown values are normalized to 'na'.
         """
         col_map = {
             'id': 'e.id',
@@ -107,10 +157,17 @@ class Export:
         return count
 
     def write_fullpagecsv(self, filename) -> int:
-        """
-        Write CSV file
-        :param filename:
-        :return:
+        """Write full page data including readable content to CSV file.
+
+        Args:
+            filename: Path to output CSV file.
+
+        Returns:
+            int: Number of expression records written.
+
+        Notes:
+            Similar to write_pagecsv but includes the readable field.
+            Contains full extracted content from Mercury Parser.
         """
         col_map = {
             'id': 'e.id',
@@ -141,10 +198,17 @@ class Export:
         return self.write_csv(filename, col_map.keys(), cursor)
 
     def write_nodecsv(self, filename) -> int:
-        """
-        Write CSV file
-        :param filename:
-        :return:
+        """Write domain-level aggregated data to CSV file.
+
+        Args:
+            filename: Path to output CSV file.
+
+        Returns:
+            int: Number of domain records written.
+
+        Notes:
+            Aggregates expressions by domain with counts and average relevance.
+            Each row represents a unique domain in the land.
         """
         col_map = {
             'id': 'd.id',
@@ -167,10 +231,17 @@ class Export:
         return self.write_csv(filename, col_map.keys(), cursor)
 
     def write_mediacsv(self, filename) -> int:
-        """
-        Write CSV file
-        :param filename:
-        :return:
+        """Write media links to CSV file.
+
+        Args:
+            filename: Path to output CSV file.
+
+        Returns:
+            int: Number of media records written.
+
+        Notes:
+            Exports all media associated with expressions in the land.
+            Includes media ID, expression ID, URL, and type.
         """
         col_map = {
             'id': 'm.id',
@@ -191,12 +262,19 @@ class Export:
 
     @staticmethod
     def write_csv(filename, keys, cursor):
-        """
-        CSV writer
-        :param filename:
-        :param keys:
-        :param cursor:
-        :return:
+        """Write database cursor results to CSV file.
+
+        Args:
+            filename: Path to output CSV file.
+            keys: List of column header names.
+            cursor: Database cursor with query results.
+
+        Returns:
+            int: Number of rows written (excluding header).
+
+        Notes:
+            All fields are quoted using csv.QUOTE_ALL.
+            Encoding is UTF-8 with Unix-style line endings.
         """
         count = 0
         with open(filename, 'w', newline='\n', encoding="utf-8") as file:
@@ -212,7 +290,22 @@ class Export:
         return count
 
     def _fetch_page_rows_with_seorank(self, column_map: dict, sql: str):
-        """Return base row data and parsed SEO Rank payloads, plus discovered keys."""
+        """Fetch page rows with parsed SEO rank data.
+
+        Args:
+            column_map: Dictionary mapping output column names to SQL expressions.
+            sql: SQL query template with {} placeholder for column definitions.
+
+        Returns:
+            tuple: A tuple containing:
+                - list: Records as (base_data, seorank_payload) tuples.
+                - list: Sorted list of unique SEO rank keys found across all rows.
+
+        Notes:
+            Automatically adds '_seorank' to column map for fetching raw JSON.
+            SEO rank payload is parsed from JSON and separated from base data.
+            Keys are collected from all rows to ensure consistent column ordering.
+        """
         select_map = dict(column_map)
         select_map['_seorank'] = 'e.seorank'
         cursor = self.get_sql_cursor(sql, select_map)
@@ -232,7 +325,19 @@ class Export:
 
     @staticmethod
     def _parse_seorank_payload(payload) -> dict:
-        """Safely decode the raw SEO Rank JSON payload into a flat dict."""
+        """Safely decode raw SEO rank JSON payload into flat dictionary.
+
+        Args:
+            payload: Raw SEO rank data (may be None, memoryview, bytes, or string).
+
+        Returns:
+            dict: Parsed JSON data with string keys, or empty dict if parsing fails.
+
+        Notes:
+            Handles multiple input types: None, memoryview, bytes, and strings.
+            Returns empty dict for None, empty, or malformed JSON.
+            All keys are converted to strings for consistent ordering.
+        """
         if payload is None:
             return {}
         if isinstance(payload, memoryview):
@@ -253,7 +358,20 @@ class Export:
 
     @staticmethod
     def _normalize_value(value):
-        """Normalize export values, mapping missing/unknown entries to 'na'."""
+        """Normalize export values for consistent CSV output.
+
+        Args:
+            value: Value to normalize (any type).
+
+        Returns:
+            Normalized value as string, number, or 'na' for missing/empty values.
+
+        Notes:
+            Converts memoryview and bytes to UTF-8 strings.
+            Serializes lists and dicts to JSON (or 'na' if empty).
+            Preserves int and float types unchanged.
+            Maps None, empty strings, and 'unknown' to 'na'.
+        """
         if value is None:
             return 'na'
         if isinstance(value, memoryview):
@@ -274,10 +392,19 @@ class Export:
         return val_str
 
     def write_pagegexf(self, filename) -> int:
-        """
-        Page GEXF writer
-        :param filename:
-        :return:
+        """Write page-level network graph to GEXF format.
+
+        Args:
+            filename: Path to output GEXF file.
+
+        Returns:
+            int: Number of expression nodes written.
+
+        Notes:
+            Creates directed graph with expressions as nodes and links as edges.
+            Includes SEO rank metadata as dynamic attributes.
+            Edges only connect expressions from different domains.
+            Uses GEXF 1.2 format compatible with network analysis tools like Gephi.
         """
         count = 0
         base_attributes = [
@@ -361,10 +488,20 @@ class Export:
         return count
 
     def write_pseudolinks(self, filename) -> int:
-        """Write CSV of paragraph-level semantic links (pseudolinks).
-        Columns (as per embedding.md advanced spec):
-        - Source_ParagraphID, Target_ParagraphID, RelationScore (-1|0|1), ConfidenceScore,
-          Source_Text, Target_Text, Source_ExpressionID, Target_ExpressionID
+        """Write paragraph-level semantic links to CSV file.
+
+        Args:
+            filename: Path to output CSV file.
+
+        Returns:
+            int: Number of paragraph similarity records written.
+
+        Notes:
+            Exports semantic relationships between paragraphs based on NLI/embedding similarity.
+            Columns: Source_ParagraphID, Target_ParagraphID, RelationScore (-1|0|1),
+            ConfidenceScore, Source_Text, Target_Text, Source_ExpressionID, Target_ExpressionID.
+            Only includes similarities from 'nli', 'cosine', or 'cosine_lsh' methods.
+            Results ordered by descending score.
         """
         col_map = {
             'Source_ParagraphID': 'p1.id',
@@ -394,11 +531,20 @@ class Export:
         return self.write_csv(filename, col_map.keys(), cursor)
 
     def write_pseudolinkspage(self, filename) -> int:
-        """Write CSV of page-level (expression) aggregated pseudolinks.
-        Aggregates paragraph-level similarities into undirected edges between expressions.
-        Columns:
-        - Source_ExpressionID, Target_ExpressionID, Source_DomainID, Target_DomainID,
-          PairCount, EntailCount, NeutralCount, ContradictCount, AvgRelationScore, AvgConfidence
+        """Write page-level aggregated semantic links to CSV file.
+
+        Args:
+            filename: Path to output CSV file.
+
+        Returns:
+            int: Number of expression-level aggregated similarity records written.
+
+        Notes:
+            Aggregates paragraph similarities into undirected edges between expressions.
+            Columns: Source_ExpressionID, Target_ExpressionID, Source_DomainID, Target_DomainID,
+            PairCount, EntailCount, NeutralCount, ContradictCount, AvgRelationScore, AvgConfidence.
+            Uses canonical ordering (smaller ID first) to avoid duplicate edges.
+            Results ordered by descending PairCount.
         """
         col_map = {
             'Source_ExpressionID': 'CASE WHEN e1.id <= e2.id THEN e1.id ELSE e2.id END',
@@ -435,11 +581,20 @@ class Export:
         return self.write_csv(filename, col_map.keys(), cursor)
 
     def write_pseudolinksdomain(self, filename) -> int:
-        """Write CSV of domain-level aggregated pseudolinks.
-        Aggregates paragraph-level similarities into undirected edges between domains.
-        Columns:
-        - Source_DomainID, Source_Domain, Target_DomainID, Target_Domain,
-          PairCount, EntailCount, NeutralCount, ContradictCount, AvgRelationScore, AvgConfidence
+        """Write domain-level aggregated semantic links to CSV file.
+
+        Args:
+            filename: Path to output CSV file.
+
+        Returns:
+            int: Number of domain-level aggregated similarity records written.
+
+        Notes:
+            Aggregates paragraph similarities into undirected edges between domains.
+            Columns: Source_DomainID, Source_Domain, Target_DomainID, Target_Domain,
+            PairCount, EntailCount, NeutralCount, ContradictCount, AvgRelationScore, AvgConfidence.
+            Uses canonical ordering (smaller domain ID first) to avoid duplicate edges.
+            Results ordered by descending PairCount.
         """
         col_map = {
             'Source_DomainID': 'CASE WHEN e1.domain_id <= e2.domain_id THEN e1.domain_id ELSE e2.domain_id END',
@@ -478,10 +633,19 @@ class Export:
         return self.write_csv(filename, col_map.keys(), cursor)
 
     def write_nodegexf(self, filename) -> int:
-        """
-        Node GEXF writer
-        :param filename:
-        :return:
+        """Write domain-level network graph to GEXF format.
+
+        Args:
+            filename: Path to output GEXF file.
+
+        Returns:
+            int: Number of domain nodes written.
+
+        Notes:
+            Creates directed graph with domains as nodes and aggregated links as edges.
+            Edge weights represent the count of inter-domain links.
+            Only includes edges between different domains.
+            Uses GEXF 1.2 format compatible with network analysis tools like Gephi.
         """
         count = 0
         gexf_attributes = [
@@ -556,10 +720,21 @@ class Export:
         return count
 
     def get_gexf(self, attributes: list) -> tuple:
-        """
-        Initialize GEXF elements
-        :param attributes:
-        :return:
+        """Initialize GEXF XML structure with metadata and attribute definitions.
+
+        Args:
+            attributes: List of (name, type) tuples defining node attributes.
+
+        Returns:
+            tuple: Three-element tuple containing:
+                - gexf: Root GEXF element.
+                - nodes: Nodes container element.
+                - edges: Edges container element.
+
+        Notes:
+            Creates GEXF 1.2 static directed graph structure.
+            Includes meta element with creation date and creator.
+            Attribute types: 'string', 'integer', 'float', etc.
         """
         date = datetime.datetime.now().strftime("%Y-%m-%d")
         gexf = etree.Element(
@@ -588,13 +763,19 @@ class Export:
         return gexf, nodes, edges
 
     def gexf_node(self, row: dict, nodes, attributes: list, keys: tuple):
-        """
-        Get GEXF node from data
-        :param row:
-        :param nodes:
-        :param attributes:
-        :param keys:
-        :return:
+        """Create and append GEXF node element from data row.
+
+        Args:
+            row: Dictionary containing node data.
+            nodes: Parent nodes container element.
+            attributes: List of (name, type) tuples for attribute definitions.
+            keys: Tuple of (label_key, size_key) for node label and visual size.
+
+        Notes:
+            Node ID comes from row['id'].
+            Label and size are determined by keys parameter.
+            All attributes in the list are added as attvalue elements.
+            Size uses viz namespace for visual rendering in graph tools.
         """
         label_key, size_key = keys
         node = etree.SubElement(
@@ -616,11 +797,16 @@ class Export:
             print(row)
 
     def gexf_edge(self, values, edges):
-        """
-        Get GEXF edge from data
-        :param values:
-        :param edges:
-        :return:
+        """Create and append GEXF edge element from values.
+
+        Args:
+            values: List/tuple with [source_id, target_id, weight].
+            edges: Parent edges container element.
+
+        Notes:
+            Edge ID is constructed as "source_target" concatenation.
+            Weight attribute represents edge strength or count.
+            All edges are directed as per graph defaultedgetype.
         """
         etree.SubElement(
             edges,
@@ -632,6 +818,20 @@ class Export:
                 'weight': str(values[2])})
 
     def export_tags(self, filename):
+        """Export tag data in matrix or content format.
+
+        Args:
+            filename: Path to output CSV file.
+
+        Returns:
+            int: 1 if export successful, 0 if export type not recognized.
+
+        Notes:
+            Matrix type: Creates tag co-occurrence matrix with expressions as rows.
+            Content type: Exports tagged content snippets with hierarchical tag paths.
+            Tag paths are constructed using recursive CTE with '_' separator.
+            Only includes tags associated with expressions meeting relevance threshold.
+        """
         if self.type == 'matrix':
             sql = """
             WITH RECURSIVE tagPath AS (
@@ -721,10 +921,20 @@ class Export:
         return 0
 
     def write_corpus(self, filename) -> int:
-        """
-        Write corpus files in multiple ZIP archives with max 1000 expressions each
-        :param filename:
-        :return:
+        """Write text corpus as multiple ZIP archives with batching.
+
+        Args:
+            filename: Base path for output ZIP files (without .zip extension).
+
+        Returns:
+            int: Total number of expressions exported across all batches.
+
+        Notes:
+            Creates multiple ZIP files with max 1000 expressions each.
+            Files named as {base}_00001.zip, {base}_00002.zip, etc.
+            Each text file contains Dublin Core metadata header and readable content.
+            Filenames follow pattern: {id}-{slugified-title}.txt.
+            Uses UTF-8 encoding for all text files.
         """
         col_map = {
             'id': 'e.id',
@@ -788,6 +998,20 @@ class Export:
         return count
 
     def slugify(self, string):
+        """Convert string to URL-safe slug.
+
+        Args:
+            string: Input string to slugify.
+
+        Returns:
+            str: Slugified string with only lowercase alphanumeric and hyphens.
+
+        Notes:
+            Normalizes Unicode characters using NFKD normalization.
+            Removes non-ASCII characters and converts to lowercase.
+            Replaces non-alphanumeric sequences with single hyphens.
+            Strips leading and trailing hyphens.
+        """
         slug = unicodedata.normalize('NFKD', string)
         slug = str(slug.encode('ascii', 'ignore').lower())
         slug = re.sub(r'[^a-z0-9]+', '-', slug).strip('-')
@@ -795,6 +1019,21 @@ class Export:
         return re.sub(r'[-]+', '-', slug)
 
     def to_metadata(self, row) -> str:
+        """Generate Dublin Core metadata header for corpus text files.
+
+        Args:
+            row: Dictionary containing expression data (title, description, id, domain, url).
+
+        Returns:
+            str: Formatted Dublin Core metadata block with YAML-style delimiters.
+
+        Notes:
+            Uses Dublin Core metadata standard for digital resources.
+            Populated fields: Title, Description, Identifier, Publisher, Source.
+            Empty fields included for completeness: Creator, Contributor, Coverage,
+            Date, Subject, Type, Format, Language, Relation, Rights.
+            Wrapped in YAML-style triple-dash delimiters.
+        """
         metadata = """\
             ---
             Title: "{title}"

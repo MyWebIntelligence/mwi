@@ -18,7 +18,18 @@ from . import model
 
 
 def _load_vectors_for_land(land: model.Land, minrel: Optional[int] = None) -> List[Tuple[int, int, List[float], str]]:
-    """Load (paragraph_id, expression_id, vector, text) for a land."""
+    """Load paragraph embeddings and metadata for a land.
+
+    Args:
+        land: Land object to load paragraphs from.
+        minrel: Optional minimum relevance filter for expressions.
+
+    Returns:
+        List of (paragraph_id, expression_id, normalized_vector, text) tuples.
+
+    Note:
+        Vectors are L2-normalized to unit length for cosine similarity.
+    """
     rows = (model.Paragraph
             .select(
                 model.Paragraph.id,
@@ -48,25 +59,108 @@ def _load_vectors_for_land(land: model.Land, minrel: Optional[int] = None) -> Li
 
 
 class SimilarityIndex:
+    """Abstract base class for similarity index implementations.
+
+    Provides an interface for approximate nearest neighbor (ANN) search
+    over vector embeddings, supporting both exact and approximate methods.
+
+    Args:
+        dim: Dimensionality of the vectors to be indexed.
+
+    Attributes:
+        dim: The dimensionality of vectors in the index.
+    """
+
     def __init__(self, dim: int):
+        """Initialize the similarity index with a specific vector dimension.
+
+        Args:
+            dim: Dimensionality of the vectors to be indexed.
+        """
         self.dim = dim
 
     def add_items(self, vectors: List[List[float]]):
+        """Add vectors to the index.
+
+        Args:
+            vectors: List of vector embeddings to add to the index.
+
+        Raises:
+            NotImplementedError: This method must be implemented by subclasses.
+        """
         raise NotImplementedError
 
     def query(self, vector: List[float], top_k: int) -> Tuple[List[int], List[float]]:
+        """Query the index for the k nearest neighbors of a vector.
+
+        Args:
+            vector: Query vector to search for.
+            top_k: Number of nearest neighbors to return.
+
+        Returns:
+            Tuple of (indices, scores) where indices are the positions of
+            the k nearest neighbors and scores are their similarity scores.
+
+        Raises:
+            NotImplementedError: This method must be implemented by subclasses.
+        """
         raise NotImplementedError
 
 
 class BruteForceIndex(SimilarityIndex):
+    """Brute-force exact similarity index implementation.
+
+    Performs exhaustive linear search over all vectors to find nearest
+    neighbors. Suitable for small datasets or when FAISS is unavailable.
+
+    Args:
+        dim: Dimensionality of the vectors to be indexed.
+        vectors: Initial list of vector embeddings to index.
+
+    Attributes:
+        vectors: The list of vector embeddings stored in the index.
+
+    Notes:
+        Assumes vectors are L2-normalized for cosine similarity computation
+        via inner product.
+    """
+
     def __init__(self, dim: int, vectors: List[List[float]]):
+        """Initialize the brute-force index with initial vectors.
+
+        Args:
+            dim: Dimensionality of the vectors to be indexed.
+            vectors: Initial list of vector embeddings to index.
+        """
         super().__init__(dim)
         self.vectors = vectors
 
     def add_items(self, vectors: List[List[float]]):
+        """Add vectors to the index.
+
+        Args:
+            vectors: List of vector embeddings to add to the index.
+        """
         self.vectors.extend(vectors)
 
     def query(self, vector: List[float], top_k: int) -> Tuple[List[int], List[float]]:
+        """Query the index for the k nearest neighbors of a vector.
+
+        Performs exhaustive comparison with all indexed vectors using
+        cosine similarity (inner product on normalized vectors).
+
+        Args:
+            vector: Query vector to search for.
+            top_k: Number of nearest neighbors to return.
+
+        Returns:
+            Tuple of (indices, scores) where indices are the positions of
+            the k nearest neighbors and scores are their cosine similarity scores.
+
+        Notes:
+            Time complexity is O(N*D) where N is the number of vectors and
+            D is the dimensionality.
+        """
         sims = []
         for i, v in enumerate(self.vectors):
             # cosine since vectors normalized
@@ -78,6 +172,20 @@ class BruteForceIndex(SimilarityIndex):
 
 
 def _try_faiss(dim: int, vectors: List[List[float]]) -> Optional[SimilarityIndex]:
+    """Attempt to create a FAISS-based similarity index.
+
+    Args:
+        dim: Dimensionality of the vectors to be indexed.
+        vectors: Initial list of vector embeddings to index.
+
+    Returns:
+        A FAISS-based SimilarityIndex instance if FAISS is available,
+        None otherwise.
+
+    Notes:
+        Uses IndexFlatIP (inner product) on normalized vectors to compute
+        cosine similarity. Requires the faiss library to be installed.
+    """
     try:
         import faiss  # type: ignore
     except Exception:
@@ -89,14 +197,38 @@ def _try_faiss(dim: int, vectors: List[List[float]]) -> Optional[SimilarityIndex
     index.add(arr)
 
     class _FaissIndex(SimilarityIndex):
+        """FAISS-backed similarity index implementation.
+
+        Wraps a FAISS index for efficient approximate nearest neighbor search.
+
+        Attributes:
+            index: The underlying FAISS index object.
+        """
+
         def __init__(self):
+            """Initialize the FAISS index wrapper."""
             super().__init__(dim)
             self.index = index
 
         def add_items(self, vectors: List[List[float]]):
+            """Add vectors to the FAISS index.
+
+            Args:
+                vectors: List of vector embeddings to add to the index.
+            """
             self.index.add(np.array(vectors, dtype='float32'))
 
         def query(self, vector: List[float], top_k: int) -> Tuple[List[int], List[float]]:
+            """Query the FAISS index for the k nearest neighbors.
+
+            Args:
+                vector: Query vector to search for.
+                top_k: Number of nearest neighbors to return.
+
+            Returns:
+                Tuple of (indices, scores) where indices are the positions of
+                the k nearest neighbors and scores are their similarity scores.
+            """
             D, I = self.index.search(np.array([vector], dtype='float32'), top_k)
             ids = I[0].tolist()
             scores = D[0].tolist()
@@ -106,6 +238,21 @@ def _try_faiss(dim: int, vectors: List[List[float]]) -> Optional[SimilarityIndex
 
 
 def _get_index(backend: str, dim: int, vectors: List[List[float]]) -> SimilarityIndex:
+    """Create a similarity index based on the specified backend.
+
+    Args:
+        backend: Backend identifier ('faiss' or 'bruteforce').
+        dim: Dimensionality of the vectors to be indexed.
+        vectors: Initial list of vector embeddings to index.
+
+    Returns:
+        A SimilarityIndex instance using the requested backend, or
+        BruteForceIndex as fallback if the requested backend is unavailable.
+
+    Notes:
+        Falls back to BruteForceIndex if FAISS is requested but not available,
+        or if backend is not recognized.
+    """
     b = (backend or settings.similarity_backend or 'bruteforce').lower()
     if b == 'faiss':
         idx = _try_faiss(dim, vectors)
@@ -139,6 +286,15 @@ def _get_nli_predictor() -> Callable[[List[Tuple[str, str]]], List[Tuple[int, fl
             ce = CrossEncoder(name, num_labels=3)
 
             def _predict_ce(pairs: List[Tuple[str, str]]) -> List[Tuple[int, float]]:
+                """Predict NLI relations using CrossEncoder.
+
+                Args:
+                    pairs: List of (premise, hypothesis) text pairs.
+
+                Returns:
+                    List of (relation, confidence) tuples where relation is
+                    1 (entailment), 0 (neutral), or -1 (contradiction).
+                """
                 probs = ce.predict(pairs, apply_softmax=True)  # shape [N,3]
                 out: List[Tuple[int, float]] = []
                 if hasattr(ce, 'model') and hasattr(ce.model, 'config') and hasattr(ce.model.config, 'id2label'):
@@ -213,6 +369,19 @@ def _get_nli_predictor() -> Callable[[List[Tuple[str, str]]], List[Tuple[int, fl
         max_len = int(getattr(settings, 'nli_max_tokens', 512) or 512)
 
         def _predict_hf(pairs: List[Tuple[str, str]]) -> List[Tuple[int, float]]:
+            """Predict NLI relations using Hugging Face transformers.
+
+            Args:
+                pairs: List of (premise, hypothesis) text pairs.
+
+            Returns:
+                List of (relation, confidence) tuples where relation is
+                1 (entailment), 0 (neutral), or -1 (contradiction).
+
+            Notes:
+                Processes pairs one at a time on CPU to avoid memory issues
+                and platform-specific GPU/MPS quirks.
+            """
             out: List[Tuple[int, float]] = []
             with torch.no_grad():
                 for a, b in pairs:
@@ -248,6 +417,18 @@ def _get_nli_predictor() -> Callable[[List[Tuple[str, str]]], List[Tuple[int, fl
 
     # Fallback heuristic: mark all as neutral
     def _predict_fallback(pairs: List[Tuple[str, str]]) -> List[Tuple[int, float]]:
+        """Fallback predictor that marks all pairs as neutral.
+
+        Used when neither sentence-transformers nor transformers libraries
+        are available.
+
+        Args:
+            pairs: List of (premise, hypothesis) text pairs.
+
+        Returns:
+            List of (0, 0.5) tuples indicating neutral relation with 50%
+            confidence for all pairs.
+        """
         return [(0, 0.5) for _ in pairs]
 
     _nli_predictor = _predict_fallback
@@ -262,8 +443,33 @@ def run_semantic_similarity(
     minrel: Optional[int] = None,
     max_pairs: Optional[int] = None,
 ) -> int:
-    """Recall via ANN + NLI classification. Stores results in ParagraphSimilarity (method='nli').
-    Returns number of pairs written.
+    """Perform semantic similarity analysis using ANN recall and NLI classification.
+
+    Identifies semantically similar paragraph pairs using approximate nearest
+    neighbor (ANN) search on embeddings, then classifies their semantic
+    relationship (entailment/neutral/contradiction) using a cross-encoder NLI
+    model. Results are stored in the ParagraphSimilarity table with method='nli'.
+
+    Args:
+        land: Land object containing paragraphs to analyze.
+        backend: Similarity index backend ('faiss' or 'bruteforce'). If None,
+            uses settings.similarity_backend.
+        top_k: Number of nearest neighbors to consider per paragraph. If None,
+            uses settings.similarity_top_k.
+        minrel: Minimum relevance score filter for expressions. If None, includes
+            all paragraphs.
+        max_pairs: Maximum number of paragraph pairs to process. If None,
+            processes all candidate pairs.
+
+    Returns:
+        Number of paragraph similarity pairs written to the database.
+
+    Notes:
+        - Removes existing 'nli' method similarities before inserting new ones
+        - Only pairs paragraphs from different expressions
+        - Uses L2-normalized vectors for cosine similarity
+        - Progress is reported every settings.nli_progress_every_pairs pairs
+        - Results include both relation score (-1, 0, 1) and confidence
     """
     data = _load_vectors_for_land(land, minrel=minrel)
     if not data:
@@ -374,6 +580,22 @@ def run_semantic_similarity(
 
 
 def _flush_similarities(rows: List[Dict]):
+    """Batch insert paragraph similarity records into the database.
+
+    Handles backward compatibility with databases that don't have the
+    score_raw column by detecting the schema and adjusting inserts accordingly.
+
+    Args:
+        rows: List of dictionaries containing paragraph similarity data.
+            Each dict should have keys: source_paragraph, target_paragraph,
+            score, method, and optionally score_raw.
+
+    Notes:
+        - Uses cached schema check to avoid repeated PRAGMA calls
+        - Automatically falls back to row-by-row insertion if batch insert fails
+        - Warns once if score_raw column is missing from the database schema
+        - Uses atomic transactions for consistency
+    """
     if not rows:
         return
     # Backward-compat: older DBs may miss 'score_raw'. If so, drop it on insert.

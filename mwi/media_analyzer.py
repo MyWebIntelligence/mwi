@@ -8,35 +8,75 @@ from sklearn.cluster import KMeans
 from typing import Dict, Any, Optional, List
 
 def generer_palette_web_safe():
-    """
-    Génère les 216 couleurs RGB de la palette Web Safe.
+    """Generate the 216 RGB colors of the Web Safe palette.
+
+    Returns:
+        List of (r, g, b) tuples representing web-safe colors.
+
+    Note:
+        Uses standard web-safe levels: 0, 51, 102, 153, 204, 255.
     """
     niveaux = [0, 51, 102, 153, 204, 255]
     return [(r, g, b) for r in niveaux for g in niveaux for b in niveaux]
 
 def distance_rgb(c1, c2):
-    """
-    Calcule la distance euclidienne au carré entre deux couleurs RGB.
+    """Calculate squared Euclidean distance between two RGB colors.
+
+    Args:
+        c1: First RGB color as (r, g, b) tuple.
+        c2: Second RGB color as (r, g, b) tuple.
+
+    Returns:
+        Squared Euclidean distance as float.
     """
     return sum((a - b) ** 2 for a, b in zip(c1, c2))
 
 def convertir_vers_web_safe(rgb):
-    """
-    Convertit une couleur RGB en sa correspondante la plus proche dans la palette Web Safe.
+    """Convert an RGB color to its nearest Web Safe palette equivalent.
+
+    Args:
+        rgb: RGB color as (r, g, b) tuple.
+
+    Returns:
+        Nearest web-safe RGB color as (r, g, b) tuple.
     """
     palette = generer_palette_web_safe()
     return min(palette, key=lambda c: distance_rgb(rgb, c))
 
 class MediaAnalyzer:
-    """Analyseur de médias avec traitement asynchrone"""
-    
+    """Media analyzer with asynchronous processing capabilities.
+
+    Attributes:
+        session: aiohttp ClientSession for async HTTP requests.
+        settings: Configuration dictionary for analysis parameters.
+        max_size: Maximum file size in bytes for media downloads.
+    """
+
     def __init__(self, session: aiohttp.ClientSession, settings: Dict[str, Any]):
+        """Initialize MediaAnalyzer with session and settings.
+
+        Args:
+            session: Active aiohttp ClientSession for downloads.
+            settings: Configuration dict with media analysis parameters.
+        """
         self.session = session
         self.settings = settings
         self.max_size = self.settings.get('media_max_file_size', 10 * 1024 * 1024)
 
     async def analyze_image(self, url: str) -> Dict[str, Any]:
-        """Analyse complète d'une image"""
+        """Perform comprehensive image analysis.
+
+        Args:
+            url: Image URL to download and analyze.
+
+        Returns:
+            Dictionary containing image metadata, dimensions, colors, EXIF,
+            hash, and any error messages.
+
+        Note:
+            Downloads image with size limit, extracts properties, dominant
+            colors, web-safe colors, and EXIF metadata.
+        """
         result = {
             'error': None,
             'width': None,
@@ -79,7 +119,16 @@ class MediaAnalyzer:
         return result
 
     def _analyze_image_properties(self, img: Image.Image, result: Dict):
-        """Extrait les propriétés basiques de l'image"""
+        """Extract basic image properties.
+
+        Args:
+            img: PIL Image object to analyze.
+            result: Dictionary to update with extracted properties.
+
+        Note:
+            Updates result with width, height, format, color mode,
+            transparency, and aspect ratio.
+        """
         result.update({
             'width': img.width,
             'height': img.height,
@@ -90,14 +139,34 @@ class MediaAnalyzer:
         })
 
     def _has_transparency(self, img: Image.Image) -> bool:
-        """Détecte la transparence"""
+        """Detect if image contains transparency.
+
+        Args:
+            img: PIL Image object to check.
+
+        Returns:
+            True if image has any transparent pixels, False otherwise.
+
+        Note:
+            Only checks images with alpha channel (RGBA, LA modes).
+        """
         if img.mode in ('RGBA', 'LA'):
             alpha = img.getchannel('A')
             return any(pixel < 255 for pixel in alpha.getdata())
         return False
 
     def _extract_colors(self, img: Image.Image, result: Dict[str, Any]):
-        """Extrait les couleurs dominantes avec K-means"""
+        """Extract dominant colors using K-means clustering.
+
+        Args:
+            img: PIL Image object to analyze.
+            result: Dictionary to update with color information.
+
+        Note:
+            Resizes image to 100x100 for efficiency, clusters pixels into
+            dominant colors, computes percentages, and converts to web-safe
+            palette. Updates result with 'dominant_colors' and 'websafe_colors'.
+        """
         n_colors = self.settings.get('media_n_dominant_colors', 5)
         try:
             # Réduire la taille pour le traitement
@@ -139,7 +208,16 @@ class MediaAnalyzer:
             result['error'] = f"Erreur d'analyse couleur: {str(e)}"
 
     def _extract_exif(self, img: Image.Image, result: Dict[str, Any]):
-        """Extrait les métadonnées EXIF"""
+        """Extract EXIF metadata from image.
+
+        Args:
+            img: PIL Image object to analyze.
+            result: Dictionary to update with EXIF data.
+
+        Note:
+            Extracts standard EXIF fields: ImageWidth, ImageLength, Make,
+            Model, DateTime. Only includes non-null values.
+        """
         try:
             exif_data = img.getexif()
             if exif_data:

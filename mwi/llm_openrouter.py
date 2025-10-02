@@ -11,6 +11,14 @@ _call_count = 0
 
 
 def _get_land_terms(land: model.Land) -> List[str]:
+    """Retrieve all dictionary terms associated with a land.
+
+    Args:
+        land: Land object to retrieve terms for.
+
+    Returns:
+        List of term strings from the land's dictionary.
+    """
     rows = (
         model.Word.select(model.Word.term)
         .join(model.LandDictionary)
@@ -20,6 +28,20 @@ def _get_land_terms(land: model.Land) -> List[str]:
 
 
 def build_relevance_prompt(land: model.Land, expression: model.Expression, readable_text: str) -> str:
+    """Build a French-language LLM prompt for relevance evaluation.
+
+    Args:
+        land: Land object containing project context.
+        expression: Expression object to evaluate.
+        readable_text: Extracted readable content from the expression.
+
+    Returns:
+        Formatted prompt string requesting yes/no relevance judgment.
+
+    Note:
+        Prompt is in French and instructs the LLM to respond only with
+        "oui" or "non" without additional commentary.
+    """
     terms = ", ".join(_get_land_terms(land))
     title = str(getattr(expression, "title", "") or "")
     desc = str(getattr(expression, "description", "") or "")
@@ -44,6 +66,17 @@ def build_relevance_prompt(land: model.Land, expression: model.Expression, reada
 
 
 def _normalize_yesno(text: str) -> str:
+    """Normalize LLM response to standard yes/no format.
+
+    Args:
+        text: Raw response text from LLM.
+
+    Returns:
+        Normalized response: "oui", "non", or "?" for unclear responses.
+
+    Note:
+        Handles both French (oui/non) and English (yes/no) responses.
+    """
     t = (text or "").strip().lower()
     if t.startswith("non") or t == "no":
         return "non"
@@ -53,6 +86,20 @@ def _normalize_yesno(text: str) -> str:
 
 
 def ask_openrouter_yesno(prompt: str) -> str:
+    """Send a yes/no question to OpenRouter API.
+
+    Args:
+        prompt: Formatted prompt string for the LLM.
+
+    Returns:
+        Raw response content from the LLM.
+
+    Raises:
+        requests.HTTPError: If the API request fails.
+
+    Note:
+        Uses temperature=0 for deterministic responses.
+    """
     headers = {
         "Authorization": f"Bearer {settings.openrouter_api_key}",
         "Content-Type": "application/json",
@@ -74,6 +121,20 @@ def ask_openrouter_yesno(prompt: str) -> str:
 
 
 def is_relevant_via_openrouter(land: model.Land, expression: model.Expression) -> Optional[bool]:
+    """Evaluate expression relevance using OpenRouter LLM.
+
+    Args:
+        land: Land object providing research context.
+        expression: Expression object to evaluate for relevance.
+
+    Returns:
+        True if relevant, False if not relevant, None if inconclusive or
+        disabled/error.
+
+    Note:
+        Respects settings for enabled status, API credentials, and call
+        budget. Increments global call counter. Prints verdict to stdout.
+    """
     global _call_count
 
     # Preconditions

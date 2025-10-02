@@ -1,5 +1,12 @@
 """
-Mercury Parser Readable Pipeline - Système autonome d'enrichissement
+Mercury Parser Readable Pipeline - Système autonome d'enrichissement.
+
+Mercury Parser Readable Pipeline - Autonomous enrichment system.
+
+This module provides a complete pipeline for extracting readable content from web pages
+using Mercury Parser. It includes automatic fallback to Wayback Machine snapshots when
+live extraction fails, configurable merge strategies for content fusion, and support
+for media and link extraction from markdown content.
 """
 import asyncio
 import json
@@ -16,7 +23,15 @@ from .core import get_land_dictionary, prefer_earlier_datetime
 
 
 class MergeStrategy(Enum):
-    """Stratégies de fusion des données"""
+    """Stratégies de fusion des données.
+
+    Data merge strategies for combining Mercury Parser results with existing data.
+
+    Attributes:
+        MERCURY_PRIORITY: Mercury Parser data always overwrites existing data.
+        PRESERVE_EXISTING: Keeps existing data if it's not empty.
+        SMART_MERGE: Intelligent fusion based on field type and content quality.
+    """
     MERCURY_PRIORITY = "mercury_priority"     # Mercury écrase toujours
     PRESERVE_EXISTING = "preserve_existing"   # Garde l'existant si non vide
     SMART_MERGE = "smart_merge"               # Fusion intelligente
@@ -24,7 +39,30 @@ class MergeStrategy(Enum):
 
 @dataclass
 class MercuryResult:
-    """Structure des résultats Mercury Parser"""
+    """Structure des résultats Mercury Parser.
+
+    Data structure for Mercury Parser extraction results.
+
+    Attributes:
+        title: Extracted page title.
+        content: Main content in HTML format.
+        markdown: Main content in Markdown format.
+        lead_image_url: URL of the primary image.
+        date_published: Publication date as string.
+        author: Author name or byline.
+        excerpt: Short excerpt or description.
+        domain: Domain name of the source.
+        word_count: Number of words in the content.
+        direction: Text direction (ltr/rtl).
+        total_pages: Total number of pages for paginated content.
+        rendered_pages: Number of pages actually rendered.
+        next_page_url: URL of the next page in pagination.
+        media: List of extracted media items (images, videos).
+        links: List of extracted hyperlinks.
+        raw_response: Complete raw JSON response from Mercury Parser.
+        error: Error message if extraction failed.
+        extraction_timestamp: Timestamp when extraction occurred.
+    """
     title: Optional[str] = None
     content: Optional[str] = None
     markdown: Optional[str] = None
@@ -47,7 +85,17 @@ class MercuryResult:
 
 @dataclass
 class ExpressionUpdate:
-    """Structure pour les mises à jour d'expression"""
+    """Structure pour les mises à jour d'expression.
+
+    Data structure for tracking expression updates.
+
+    Attributes:
+        expression_id: ID of the expression being updated.
+        field_updates: Dictionary mapping field names to (old_value, new_value) tuples.
+        media_additions: List of media items to add to the expression.
+        link_additions: List of links to add to the expression.
+        update_reason: Human-readable reason for the update.
+    """
     expression_id: int
     field_updates: Dict[str, Tuple[Any, Any]]  # (old_value, new_value)
     media_additions: List[Dict[str, Any]]
@@ -56,7 +104,14 @@ class ExpressionUpdate:
 
 
 class MercuryReadablePipeline:
-    """Pipeline autonome pour l'extraction readable avec Mercury Parser"""
+    """Pipeline autonome pour l'extraction readable avec Mercury Parser.
+
+    Autonomous pipeline for readable content extraction using Mercury Parser.
+
+    This class orchestrates the entire extraction process including fetching content,
+    applying merge strategies, extracting media and links, and updating the database.
+    It supports batch processing, automatic retries, and fallback to Wayback Machine.
+    """
 
     def __init__(self,
                  mercury_path: str = "mercury-parser",
@@ -64,6 +119,19 @@ class MercuryReadablePipeline:
                  batch_size: int = 10,
                  max_retries: int = 3,
                  llm_enabled: bool = False):
+        """Initialize the Mercury Parser readable pipeline.
+
+        Args:
+            mercury_path: Path or command to invoke Mercury Parser CLI.
+            merge_strategy: Strategy for merging Mercury data with existing data.
+            batch_size: Number of expressions to process concurrently in each batch.
+            max_retries: Maximum number of retry attempts for failed extractions.
+            llm_enabled: Whether to use LLM-based relevance validation via OpenRouter.
+
+        Notes:
+            Statistics are tracked in self.stats dictionary including processed count,
+            updates, errors, skipped items, and Wayback Machine usage.
+        """
         self.mercury_path = mercury_path
         self.merge_strategy = merge_strategy
         self.batch_size = batch_size
@@ -82,16 +150,25 @@ class MercuryReadablePipeline:
                           land: model.Land,
                           limit: Optional[int] = None,
                           depth: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Point d'entrée principal du pipeline
+        """Point d'entrée principal du pipeline.
+
+        Main entry point for the pipeline processing.
 
         Args:
-            land: Land à traiter
-            limit: Nombre maximum d'expressions à traiter
-            depth: Profondeur maximale des expressions à traiter
+            land: The land object to process.
+            limit: Maximum number of expressions to process (None for unlimited).
+            depth: Filter expressions by specific depth level (None for all depths).
 
         Returns:
-            Statistiques du traitement
+            Dictionary containing pipeline statistics including processed count,
+            updated count, errors, skipped items, and success rate.
+
+        Notes:
+            - Retrieves the land dictionary for relevance calculation
+            - Fetches expressions that have been crawled but not yet readable-processed
+            - Processes expressions in configurable batch sizes for efficiency
+            - Updates statistics throughout processing
+            - Returns comprehensive statistics via _get_pipeline_stats()
         """
         self.logger.info(f"Starting readable pipeline for land: {land.name}")
 
@@ -117,7 +194,23 @@ class MercuryReadablePipeline:
                                     land: model.Land,
                                     limit: Optional[int],
                                     depth: Optional[int]) -> List[model.Expression]:
-        """Récupère les expressions à traiter selon les critères"""
+        """Récupère les expressions à traiter selon les critères.
+
+        Retrieve expressions to process based on filtering criteria.
+
+        Args:
+            land: The land object to retrieve expressions from.
+            limit: Maximum number of expressions to retrieve (None for unlimited).
+            depth: Filter expressions by specific depth level (None for all depths).
+
+        Returns:
+            List of Expression objects that match the criteria, ordered by fetch date
+            and depth, with never-processed expressions prioritized.
+
+        Notes:
+            Only returns expressions that have been fetched (fetched_at not null) but
+            not yet processed through the readable pipeline (readable_at is null).
+        """
         query = model.Expression.select().where(
             (model.Expression.land == land) &
             (model.Expression.fetched_at.is_null(False)) &
@@ -142,7 +235,22 @@ class MercuryReadablePipeline:
     async def _process_batch(self,
                              expressions: List[model.Expression],
                              dictionary) -> None:
-        """Traite un batch d'expressions en parallèle"""
+        """Traite un batch d'expressions en parallèle.
+
+        Process a batch of expressions concurrently.
+
+        Args:
+            expressions: List of Expression objects to process in this batch.
+            dictionary: Land dictionary for relevance calculation.
+
+        Returns:
+            None. Updates self.stats with processing results.
+
+        Notes:
+            Uses asyncio.gather to process all expressions in the batch concurrently.
+            Exceptions from individual expressions are caught and logged without
+            stopping the entire batch.
+        """
         tasks = []
         for expression in expressions:
             task = self._process_single_expression(expression, dictionary)
@@ -161,8 +269,28 @@ class MercuryReadablePipeline:
     async def _process_single_expression(self,
                                          expression: model.Expression,
                                          dictionary) -> Optional[ExpressionUpdate]:
-        """
-        Traite une expression unique avec Mercury Parser
+        """Traite une expression unique avec Mercury Parser.
+
+        Process a single expression with Mercury Parser extraction.
+
+        Args:
+            expression: The Expression object to process.
+            dictionary: Land dictionary for relevance calculation.
+
+        Returns:
+            ExpressionUpdate object with field changes and additions, or None if
+            extraction failed or no updates were needed.
+
+        Raises:
+            Exception: Re-raises any exception that occurs during processing after
+                       logging the error.
+
+        Notes:
+            - Attempts Mercury Parser extraction with automatic Wayback fallback
+            - Updates readable_at timestamp even on failure
+            - Applies configured merge strategy for content fusion
+            - Recalculates relevance if content was updated
+            - Updates statistics counters (updated, skipped, errors)
         """
         try:
             print(f"🔄 Processing URL: {expression.url}")
@@ -196,7 +324,23 @@ class MercuryReadablePipeline:
             raise
 
     async def _extract_with_mercury(self, url: str) -> MercuryResult:
-        """Extraction Mercury + fallback Wayback si nécessaire."""
+        """Extraction Mercury + fallback Wayback si nécessaire.
+
+        Extract content using Mercury Parser with automatic Wayback Machine fallback.
+
+        Args:
+            url: The URL to extract content from.
+
+        Returns:
+            MercuryResult object containing extracted content or error information.
+
+        Notes:
+            - First attempts extraction from the live URL
+            - If extraction fails, searches for the earliest Wayback Machine snapshot
+            - Attempts extraction from Wayback snapshot if available
+            - Adds metadata to result indicating Wayback source and snapshot details
+            - Updates wayback_used counter in statistics when fallback is successful
+        """
         primary_result = await self._run_mercury(url)
 
         if not primary_result.error:
@@ -237,7 +381,24 @@ class MercuryReadablePipeline:
         return wayback_result
 
     async def _run_mercury(self, url: str) -> MercuryResult:
-        """Exécute Mercury Parser et retourne le résultat brut."""
+        """Exécute Mercury Parser et retourne le résultat brut.
+
+        Execute Mercury Parser CLI and return the raw result.
+
+        Args:
+            url: The URL to extract content from.
+
+        Returns:
+            MercuryResult object populated with extracted data or error information.
+
+        Notes:
+            - Executes Mercury Parser as a subprocess with markdown and media extraction
+            - Implements exponential backoff retry logic (max_retries attempts)
+            - Parses JSON output and populates all MercuryResult fields
+            - Sets extraction_timestamp to track when extraction occurred
+            - Returns result with error field populated if all attempts fail
+            - Handles JSON decode errors and subprocess execution failures
+        """
         result = MercuryResult(extraction_timestamp=datetime.now())
 
         for attempt in range(self.max_retries):
@@ -292,7 +453,26 @@ class MercuryReadablePipeline:
         return result
 
     async def _fetch_wayback_first_snapshot(self, url: str) -> Optional[Tuple[str, str]]:
-        """Récupère la première snapshot Wayback disponible pour l'URL donnée."""
+        """Récupère la première snapshot Wayback disponible pour l'URL donnée.
+
+        Fetch the first available Wayback Machine snapshot for a given URL.
+
+        Args:
+            url: The URL to search for in the Wayback Machine.
+
+        Returns:
+            Tuple of (snapshot_url, timestamp) if a snapshot is found, None otherwise.
+            The snapshot_url is the full Wayback Machine URL for accessing the archived page.
+            The timestamp is the capture date in Wayback format (YYYYMMDDhhmmss).
+
+        Notes:
+            - Uses Wayback CDX API to search for snapshots
+            - First tries to find snapshots with HTTP 200 status code
+            - Falls back to any available snapshot if 200 status search fails
+            - Returns the earliest available snapshot
+            - Uses 10-second timeout for API requests
+            - Handles various failure modes gracefully (HTTP errors, JSON parse errors)
+        """
         base_url = "https://web.archive.org/cdx/search/cdx"
         params_common = {
             'url': url,
@@ -340,7 +520,23 @@ class MercuryReadablePipeline:
         return None
 
     def _extract_media_and_links(self, data: Dict, result: MercuryResult) -> None:
-        """Extrait les médias et liens du résultat Mercury"""
+        """Extrait les médias et liens du résultat Mercury.
+
+        Extract media items and links from Mercury Parser JSON response.
+
+        Args:
+            data: The raw JSON dictionary from Mercury Parser.
+            result: MercuryResult object to populate with extracted media and links.
+
+        Returns:
+            None. Modifies result.media and result.links lists in place.
+
+        Notes:
+            - Extracts images from 'images' field with src, alt, and title attributes
+            - Extracts videos from 'videos' field with src and poster attributes
+            - Extracts links from 'links' field with href, text, and title attributes
+            - Handles both string URLs and dictionary objects for flexibility
+        """
         # Extraction des images
         if 'images' in data:
             for img in data.get('images', []):
@@ -375,9 +571,23 @@ class MercuryReadablePipeline:
     def _prepare_expression_update(self,
                                    expression: model.Expression,
                                    mercury_result: MercuryResult) -> ExpressionUpdate:
-        """
-        Prépare les mises à jour en appliquant la stratégie de fusion.
-        Extraction des médias et liens à partir du markdown final (readable) après fusion.
+        """Prépare les mises à jour en appliquant la stratégie de fusion.
+
+        Prepare expression updates by applying the configured merge strategy.
+
+        Args:
+            expression: The Expression object to update.
+            mercury_result: MercuryResult containing extracted data from Mercury Parser.
+
+        Returns:
+            ExpressionUpdate object with field updates, media additions, and link additions.
+
+        Notes:
+            - Applies merge strategy to title, description, readable, lang, and published_at
+            - Tracks old and new values for each updated field
+            - Extracts media and links from the final merged markdown content
+            - Only includes fields where Mercury provided non-null values
+            - Media and links are extracted from markdown after merge, ensuring consistency
         """
         update = ExpressionUpdate(
             expression_id=expression.get_id(),
@@ -424,13 +634,24 @@ class MercuryReadablePipeline:
                               current_value: Any,
                               mercury_value: Any,
                               field_name: str) -> Any:
-        """
-        Applique la stratégie de fusion configurée
+        """Applique la stratégie de fusion configurée.
 
-        Logique:
-        - Si base vide -> remplit avec Mercury
-        - Si Mercury plein et base pleine -> selon stratégie
-        - Si base pleine et Mercury vide -> garde base
+        Apply the configured merge strategy to determine the final value.
+
+        Args:
+            current_value: The existing value in the database.
+            mercury_value: The new value from Mercury Parser.
+            field_name: Name of the field being merged (affects smart merge logic).
+
+        Returns:
+            The final value to use after applying the merge strategy.
+
+        Notes:
+            Merge logic:
+            - If current value is empty: use Mercury value
+            - If Mercury value is empty: keep current value
+            - If both have values: apply strategy (MERCURY_PRIORITY, PRESERVE_EXISTING, or SMART_MERGE)
+            - SMART_MERGE uses field-specific logic (see _smart_merge method)
         """
         # Si la base est vide, on prend Mercury
         if not current_value:
@@ -451,8 +672,25 @@ class MercuryReadablePipeline:
         return current_value
 
     def _smart_merge(self, current_value: Any, mercury_value: Any, field_name: str) -> Any:
-        """
-        Fusion intelligente selon le type de champ
+        """Fusion intelligente selon le type de champ.
+
+        Intelligent merge logic with field-specific strategies.
+
+        Args:
+            current_value: The existing value in the database.
+            mercury_value: The new value from Mercury Parser.
+            field_name: Name of the field being merged.
+
+        Returns:
+            The final value selected based on field-specific heuristics.
+
+        Notes:
+            Field-specific strategies:
+            - published_at: Prefers earlier datetime (oldest publication date)
+            - title: Prefers longer, more informative title
+            - readable: Prefers Mercury (cleaner extraction)
+            - description: Prefers longer description
+            - Other fields: Mercury value takes priority by default
         """
         if field_name == 'published_at':
             if mercury_value is None:
@@ -483,8 +721,22 @@ class MercuryReadablePipeline:
             return mercury_value
 
     def _extract_media_from_markdown(self, markdown: Optional[str], base_url: str) -> List[Dict[str, Any]]:
-        """
-        Extrait les médias (images, vidéos) à partir du markdown final.
+        """Extrait les médias (images, vidéos) à partir du markdown final.
+
+        Extract media items (images, videos) from markdown content.
+
+        Args:
+            markdown: The markdown content to parse for media.
+            base_url: Base URL for resolving relative media URLs.
+
+        Returns:
+            List of dictionaries containing media metadata (type, url, alt, title).
+
+        Notes:
+            - Parses markdown image syntax: ![alt](url "title")
+            - Converts relative URLs to absolute using base_url
+            - Currently only extracts images (video extraction can be added)
+            - Empty or None markdown returns empty list
         """
         import re
         from urllib.parse import urljoin
@@ -506,8 +758,23 @@ class MercuryReadablePipeline:
         return media
 
     def _extract_links_from_markdown(self, markdown: Optional[str], base_url: str) -> List[Dict[str, Any]]:
-        """
-        Extrait les liens à partir du markdown final.
+        """Extrait les liens à partir du markdown final.
+
+        Extract hyperlinks from markdown content.
+
+        Args:
+            markdown: The markdown content to parse for links.
+            base_url: Base URL for resolving relative link URLs.
+
+        Returns:
+            List of dictionaries containing link metadata (url, text, title).
+            Duplicate URLs are automatically filtered out.
+
+        Notes:
+            - Parses markdown link syntax: [text](url "title")
+            - Converts relative URLs to absolute using base_url
+            - Deduplicates links by URL
+            - Empty or None markdown returns empty list
         """
         import re
         from urllib.parse import urljoin
@@ -532,8 +799,27 @@ class MercuryReadablePipeline:
                        expression: model.Expression,
                        update: ExpressionUpdate,
                        dictionary) -> None:
-        """
-        Applique les mises à jour à la base de données
+        """Applique les mises à jour à la base de données.
+
+        Apply all updates to the expression in the database.
+
+        Args:
+            expression: The Expression object to update.
+            update: ExpressionUpdate containing all changes to apply.
+            dictionary: Land dictionary for recalculating relevance.
+
+        Returns:
+            None. Updates expression and related database records in place.
+
+        Notes:
+            - Updates all changed fields on the expression
+            - Always sets readable_at timestamp to now
+            - Recalculates relevance if readable content changed
+            - Optionally validates relevance using OpenRouter LLM if enabled
+            - Sets approved_at if relevance is positive
+            - Deletes existing media before adding new ones (ensures consistency)
+            - Creates new ExpressionLink records for discovered links
+            - Saves expression after all updates
         """
         # Mise à jour des champs de l'expression
         for field_name, (old_value, new_value) in update.field_updates.items():
@@ -583,7 +869,24 @@ class MercuryReadablePipeline:
     def _update_expression_links(self,
                                  expression: model.Expression,
                                  new_links: List[Dict[str, Any]]) -> None:
-        """Met à jour les liens de l'expression"""
+        """Met à jour les liens de l'expression.
+
+        Update the expression's outgoing links in the database.
+
+        Args:
+            expression: The source Expression object.
+            new_links: List of dictionaries containing link metadata (url, text, title).
+
+        Returns:
+            None. Updates ExpressionLink records in database.
+
+        Notes:
+            - Deletes all existing outgoing links from this expression
+            - Creates target expressions for new links (one depth level deeper)
+            - Creates ExpressionLink records connecting source to targets
+            - Silently ignores link creation failures (duplicate constraints)
+            - Uses the expression's land for creating target expressions
+        """
         model.ExpressionLink.delete().where(
             model.ExpressionLink.source == expression
         ).execute()
@@ -605,12 +908,41 @@ class MercuryReadablePipeline:
                     pass
 
     def _calculate_relevance(self, dictionary, expression: model.Expression) -> int:
-        """Calcule la pertinence selon le dictionnaire du land"""
+        """Calcule la pertinence selon le dictionnaire du land.
+
+        Calculate expression relevance score based on land dictionary.
+
+        Args:
+            dictionary: Land dictionary containing relevant terms.
+            expression: Expression object to score.
+
+        Returns:
+            Integer relevance score (typically 0-100+ range).
+
+        Notes:
+            Delegates to core.expression_relevance for the actual calculation.
+        """
         from .core import expression_relevance
         return expression_relevance(dictionary, expression)
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
-        """Parse une date depuis Mercury"""
+        """Parse une date depuis Mercury.
+
+        Parse a date string from Mercury Parser into a datetime object.
+
+        Args:
+            date_str: Date string to parse (various formats supported).
+
+        Returns:
+            Datetime object if parsing succeeds, None otherwise.
+
+        Notes:
+            Attempts parsing with multiple common date formats:
+            - ISO 8601 with milliseconds: %Y-%m-%dT%H:%M:%S.%fZ
+            - Simple date: %Y-%m-%d
+            - ISO 8601 without milliseconds: %Y-%m-%dT%H:%M:%SZ
+            Returns None if the string is empty or all formats fail.
+        """
         if not date_str:
             return None
         try:
@@ -624,7 +956,21 @@ class MercuryReadablePipeline:
             return None
 
     def _resolve_url(self, url: str, base_url: str) -> str:
-        """Résout une URL relative en URL absolue"""
+        """Résout une URL relative en URL absolue.
+
+        Resolve a relative URL to an absolute URL.
+
+        Args:
+            url: URL to resolve (may be relative or absolute).
+            base_url: Base URL to resolve relative URLs against.
+
+        Returns:
+            Absolute URL string. Returns empty string if url is empty.
+
+        Notes:
+            - URLs starting with http://, https://, or data: are returned as-is
+            - Relative URLs are resolved using urllib.parse.urljoin
+        """
         from urllib.parse import urljoin
 
         if not url:
@@ -634,7 +980,19 @@ class MercuryReadablePipeline:
         return urljoin(base_url, url)
 
     def _is_valid_link(self, url: str) -> bool:
-        """Vérifie si un lien est valide pour l'ajout"""
+        """Vérifie si un lien est valide pour l'ajout.
+
+        Check if a link is valid for adding to the database.
+
+        Args:
+            url: URL to validate.
+
+        Returns:
+            True if the URL is crawlable, False otherwise.
+
+        Notes:
+            Delegates to core.is_crawlable for the actual validation logic.
+        """
         from .core import is_crawlable
         return is_crawlable(url)
 
@@ -642,7 +1000,22 @@ class MercuryReadablePipeline:
                                   land: model.Land,
                                   url: str,
                                   depth: int) -> Optional[model.Expression]:
-        """Récupère ou crée une expression"""
+        """Récupère ou crée une expression.
+
+        Retrieve an existing expression or create a new one.
+
+        Args:
+            land: The land to associate the expression with.
+            url: URL of the expression.
+            depth: Crawl depth level for the expression.
+
+        Returns:
+            Expression object if creation/retrieval succeeds, None otherwise.
+
+        Notes:
+            Delegates to core.add_expression which may return bool or Expression.
+            Only returns Expression objects, converts other return types to None.
+        """
         from .core import add_expression
         result = add_expression(land, url, depth)
         # add_expression peut retourner bool ou Expression
@@ -651,7 +1024,23 @@ class MercuryReadablePipeline:
         return None
 
     def _get_pipeline_stats(self) -> Dict[str, Any]:
-        """Retourne les statistiques du pipeline"""
+        """Retourne les statistiques du pipeline.
+
+        Return pipeline execution statistics.
+
+        Returns:
+            Dictionary containing:
+            - processed: Total number of expressions processed
+            - updated: Number of expressions successfully updated
+            - errors: Number of processing errors
+            - skipped: Number of expressions skipped (no changes needed)
+            - wayback_used: Number of times Wayback Machine was used
+            - success_rate: Percentage of successful updates (0-100)
+
+        Notes:
+            Success rate is calculated as (updated / processed * 100).
+            Returns 0% if no expressions were processed.
+        """
         return {
             'processed': self.stats['processed'],
             'updated': self.stats['updated'],
@@ -668,11 +1057,30 @@ async def run_readable_pipeline(land: model.Land,
                               depth: Optional[int] = None,
                               merge_strategy: str = 'smart_merge',
                               llm_enabled: bool = False) -> Tuple[int, int]:
-    """
-    Point d'entrée pour le contrôleur
+    """Point d'entrée pour le contrôleur.
+
+    Entry point for the readable pipeline controller.
+
+    Args:
+        land: The land object to process expressions from.
+        limit: Maximum number of expressions to process (None for unlimited).
+        depth: Filter expressions by specific depth level (None for all depths).
+        merge_strategy: Merge strategy name ('mercury_priority', 'preserve_existing',
+                       or 'smart_merge').
+        llm_enabled: Whether to enable LLM-based relevance validation via OpenRouter.
 
     Returns:
-        Tuple (processed_count, error_count)
+        Tuple of (processed_count, error_count) indicating pipeline execution results.
+
+    Raises:
+        Exception: Re-raises any exception that occurs during pipeline execution.
+
+    Notes:
+        - Creates and configures a MercuryReadablePipeline instance
+        - Prints progress messages to console during execution
+        - Maps merge strategy strings to MergeStrategy enum values
+        - Defaults to SMART_MERGE if an invalid strategy is provided
+        - Returns statistics about expressions processed, updated, and errors
     """
     strategy_map = {
         'mercury_priority': MergeStrategy.MERCURY_PRIORITY,

@@ -21,8 +21,24 @@ class DbController:
 
     @staticmethod
     def migrate(args: core.Namespace):
-        """
-        Exécute les migrations de base de données.
+        """Execute database migrations to update schema.
+
+        Attempts to import and run the MigrationManager from various locations
+        (migrations, migration, .migrations, .migration). After running pending
+        migrations, performs additional safety checks to ensure LLM-related
+        columns exist in the expression table.
+
+        Args:
+            args: Namespace object containing command-line arguments.
+
+        Returns:
+            int: 1 if migration completed successfully, 0 if migration manager
+                could not be located.
+
+        Notes:
+            This method tries multiple import strategies to locate the migration
+            manager module. It also includes a safety net to add validllm and
+            validmodel columns if they are missing from the expression table.
         """
         # Support 'migrations', 'migration' and hidden variants '.migrations' / '.migration'
         MigrationManager = None
@@ -75,10 +91,22 @@ class DbController:
 
     @staticmethod
     def setup(args: core.Namespace):
-        """
-        Creates database model, this is a destructive action as tables are dropped before creation
-        :param args:
-        :return:
+        """Create database schema from model definitions.
+
+        This is a destructive operation that drops all existing tables before
+        recreating them. Requires user confirmation before proceeding.
+
+        Args:
+            args: Namespace object containing command-line arguments.
+
+        Returns:
+            int: 1 if setup completed successfully, 0 if user cancelled.
+
+        Notes:
+            This method destroys all existing data. Tables created include:
+            Land, Domain, Expression, ExpressionLink, Word, LandDictionary,
+            Media, Paragraph, ParagraphEmbedding, ParagraphSimilarity, Tag,
+            and TaggedContent. User must type 'Y' to confirm the operation.
         """
         tables = [
             model.Land,
@@ -107,8 +135,26 @@ class DbController:
 
     @staticmethod
     def medianalyse(args: core.Namespace):
-        """
-        Analyse séquentielle des médias pour un land en batch
+        """Perform sequential batch media analysis for a land.
+
+        Analyzes all media files associated with expressions in the specified
+        land. Processes images to extract metadata, dimensions, colors, EXIF
+        data, and perceptual hashes. Results are stored in the Media table.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional arguments include
+                'depth' (maximum expression depth) and 'minrel' (minimum
+                relevance score).
+
+        Returns:
+            int: 1 if analysis completed successfully, 0 if land not found.
+
+        Notes:
+            Uses MediaAnalyzer with settings from the configuration module.
+            Processing is sequential (single connection) to avoid overloading
+            servers. Can be interrupted with KeyboardInterrupt. Analysis
+            metadata is stored with timestamp and error information if applicable.
         """
         core.check_args(args, 'name')
         depth = core.get_arg_option('depth', args, set_type=int, default=0)
@@ -179,8 +225,23 @@ class LandController:
 
     @staticmethod
     def medianalyse(args: core.Namespace):
-        """
-        Analyse médias pour un land
+        """Analyze media files for expressions in a land.
+
+        Initiates media analysis for all media associated with the specified
+        land using the core medianalyse_land function.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name).
+
+        Returns:
+            int: 1 if analysis completed successfully, 0 if land not found or
+                an error occurred.
+
+        Notes:
+            On Windows, this method sets up a ProactorEventLoop for async
+            operations. The actual analysis is delegated to the core module's
+            medianalyse_land function.
         """
         core.check_args(args, 'name')
         land = model.Land.get_or_none(model.Land.name == args.name)
@@ -204,7 +265,27 @@ class LandController:
 
     @staticmethod
     def seorank(args: core.Namespace):
-        """Enrichit les expressions d'un land avec les données SEO Rank."""
+        """Enrich land expressions with SEO Rank data.
+
+        Fetches SEO metrics from the SEO Rank API for expressions in the
+        specified land and updates the database with the retrieved data.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional arguments include
+                'limit' (max expressions to process), 'depth' (max expression
+                depth), 'http' (HTTP status filter), 'minrel' (minimum relevance),
+                and 'force' (force refresh of existing data).
+
+        Returns:
+            int: 1 if operation completed successfully, 0 if API key missing
+                or land not found.
+
+        Notes:
+            Requires settings.seorank_api_key or MWI_SEORANK_API_KEY environment
+            variable. The method delegates to core.update_seorank_for_land for
+            the actual API calls and database updates.
+        """
         core.check_args(args, 'name')
 
         api_key = getattr(settings, 'seorank_api_key', '')
@@ -248,10 +329,26 @@ class LandController:
 
     @staticmethod
     def consolidate(args: core.Namespace):
-        """
-        Consolidate a land: recalculates relevance, links, media, adds missing docs, recreates links, replaces old ones.
-        :param args:
-        :return:
+        """Consolidate a land by recalculating metadata and relationships.
+
+        Performs comprehensive consolidation including recalculating relevance
+        scores, rebuilding expression links, updating media references, and
+        ensuring data consistency across the land.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional arguments include
+                'limit' (max expressions to process), 'depth' (max expression
+                depth), and 'minrel' (minimum relevance score).
+
+        Returns:
+            int: 1 if consolidation completed successfully, 0 if land not found.
+
+        Notes:
+            This is an async operation that uses the event loop. On Windows,
+            a ProactorEventLoop is configured. The consolidation process may
+            take significant time for large lands. Reports number of expressions
+            consolidated and errors encountered.
         """
         core.check_args(args, 'name')
         fetch_limit = core.get_arg_option('limit', args, set_type=int, default=0)
@@ -278,10 +375,25 @@ class LandController:
 
     @staticmethod
     def list(args: core.Namespace):
-        """
-        Lists some information about existing lands
-        :param args:
-        :return:
+        """Display information about existing lands.
+
+        Shows detailed statistics for all lands or a specific land, including
+        dictionary terms, expression counts, HTTP status distributions, and
+        embedding pipeline statistics.
+
+        Args:
+            args: Namespace object containing command-line arguments. Optional
+                argument 'name' filters to a specific land.
+
+        Returns:
+            int: 1 if lands were found and displayed, 0 if no lands exist.
+
+        Notes:
+            For each land, displays: name, creation date, description, dictionary
+            terms, total expressions, remaining expressions to crawl, HTTP status
+            code distribution, and embedding statistics (paragraphs, embeddings,
+            pseudolinks). Embedding statistics are shown only if the corresponding
+            tables exist in the database.
         """
         lands = model.Land.select(
             model.Land.id,
@@ -379,10 +491,23 @@ class LandController:
 
     @staticmethod
     def create(args: core.Namespace):
-        """
-        Creates land
-        :param args:
-        :return:
+        """Create a new research land.
+
+        Creates a new land with the specified name, description, and language(s).
+        Also creates the corresponding directory structure for storing land data.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                arguments are 'name' (land name) and 'desc' (description).
+                Optional argument 'lang' specifies language(s) for the land.
+
+        Returns:
+            int: 1 indicating successful land creation.
+
+        Notes:
+            The language parameter can be a list or a single string. Multiple
+            languages are stored as comma-separated values. Creates a directory
+            at data_location/lands/{land_id} for storing land-specific files.
         """
         core.check_args(args, ('name', 'desc'))
         # Store lang as comma-separated string
@@ -394,10 +519,25 @@ class LandController:
 
     @staticmethod
     def addterm(args: core.Namespace):
-        """
-        Add terms to land dictionary
-        :param args:
-        :return:
+        """Add terms to a land's dictionary.
+
+        Adds one or more terms to the specified land's dictionary with automatic
+        lemmatization. After adding terms, recalculates relevance scores for all
+        expressions in the land.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                arguments are 'land' (land name) and 'terms' (comma-separated
+                list of terms to add).
+
+        Returns:
+            int: 1 if terms were added successfully, 0 if land not found.
+
+        Notes:
+            Each term is stemmed to create a lemma using the core.stem_word
+            function. Words are stored with both original term and lemma forms.
+            After adding terms, land_relevance is called to update expression
+            scores based on the new dictionary.
         """
         core.check_args(args, ('land', 'terms'))
         land = model.Land.get_or_none(model.Land.name == args.land)
@@ -416,10 +556,25 @@ class LandController:
 
     @staticmethod
     def addurl(args: core.Namespace):
-        """
-        Add URLs to land
-        :param args:
-        :return:
+        """Add URLs to a land.
+
+        Adds one or more URLs to the specified land as expressions. URLs can
+        be provided directly as a comma-separated string or loaded from a file.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'land' (land name). At least one of 'urls'
+                (comma-separated URLs) or 'path' (file path containing URLs)
+                must be provided.
+
+        Returns:
+            int: 1 if URLs were processed successfully, 0 if land not found.
+
+        Notes:
+            URLs from the file are read line by line with UTF-8 encoding. Each
+            URL is added via core.add_expression which handles URL normalization
+            and domain extraction. Duplicate URLs are silently skipped. Displays
+            progress for each URL added and final count.
         """
         core.check_args(args, 'land')
         land = model.Land.get_or_none(model.Land.name == args.land)
@@ -443,7 +598,30 @@ class LandController:
 
     @staticmethod
     def urlist(args: core.Namespace):
-        """Retrieve URLs from SerpAPI and add them to the land expressions table."""
+        """Retrieve URLs from SerpAPI and add them to land expressions.
+
+        Fetches search results from SerpAPI (Google, Bing, or DuckDuckGo) for
+        the specified query and adds the resulting URLs to the land. Supports
+        date range filtering and pagination.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                arguments are 'name' (land name) and 'query' (search query).
+                Optional arguments include 'engine' (search engine), 'lang'
+                (language), 'datestart' and 'dateend' (date range), 'timestep'
+                (time window for date ranges), 'sleep' (delay between requests),
+                and 'progress' (enable progress output).
+
+        Returns:
+            int: 1 if URLs were retrieved successfully, 0 if API key missing,
+                land not found, or invalid engine specified.
+
+        Notes:
+            Requires settings.serpapi_api_key or MWI_SERPAPI_API_KEY environment
+            variable. Date filtering is only supported for Google and DuckDuckGo
+            engines. For existing URLs, updates title and published_at if not
+            already set. Uses the earlier date when multiple dates are available.
+        """
         core.check_args(args, ('name', 'query'))
 
         # API key lookup mirrors other integrations (settings first, then env var).
@@ -560,10 +738,26 @@ class LandController:
 
     @staticmethod
     def delete(args: core.Namespace):
-        """
-        Delete land
-        :param args:
-        :return:
+        """Delete a land or expressions within it.
+
+        Deletes either an entire land with all associated data, or selectively
+        deletes expressions based on relevance threshold. Requires user
+        confirmation before proceeding.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional argument 'maxrel'
+                (maximum relevance) filters expressions to delete.
+
+        Returns:
+            int: 1 if deletion completed successfully, 0 if land not found or
+                user cancelled.
+
+        Notes:
+            If maxrel is provided and greater than 0, only deletes fetched
+            expressions with relevance below the threshold. Otherwise, deletes
+            the entire land and all related data (expressions, links, media,
+            etc.) via recursive deletion. User must type 'Y' to confirm.
         """
         core.check_args(args, 'name')
         maxrel = core.get_arg_option('maxrel', args, set_type=int, default=0)
@@ -587,10 +781,27 @@ class LandController:
 
     @staticmethod
     def crawl(args: core.Namespace):
-        """
-        Crawl land
-        :param args:
-        :return:
+        """Crawl expressions in a land to fetch content.
+
+        Fetches HTML content for unfetched expressions in the specified land,
+        extracts metadata, discovers links, and identifies media. Uses async
+        HTTP requests with configurable concurrency.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional arguments include
+                'limit' (max URLs to fetch), 'http' (HTTP status filter), and
+                'depth' (expression depth filter).
+
+        Returns:
+            int: 1 if crawl completed successfully, 0 if land not found.
+
+        Notes:
+            Uses asyncio event loop for concurrent requests. Respects
+            settings.parallel_connections for rate limiting. Extracts page
+            title, content, outbound links, and media references. Updates
+            expression metadata including HTTP status, fetch timestamp, and
+            relevance scores.
         """
         core.check_args(args, 'name')
         fetch_limit = core.get_arg_option('limit', args, set_type=int, default=0)
@@ -614,10 +825,28 @@ class LandController:
 
     @staticmethod
     def readable(args: core.Namespace):
-        """
-        Pipeline Mercury Parser pour l'extraction readable enrichie
-        :param args:
-        :return:
+        """Extract readable content using Mercury Parser pipeline.
+
+        Uses Mercury Parser to extract clean, readable content from fetched
+        expressions. Supports different merge strategies for combining Mercury
+        results with existing data, and optional LLM validation.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional arguments include
+                'limit' (max expressions to process), 'depth' (max expression
+                depth), 'merge' (merge strategy), and 'llm' (enable LLM
+                validation).
+
+        Returns:
+            int: 1 if processing completed successfully, 0 if land not found.
+
+        Notes:
+            Merge strategies: 'smart_merge' (default, intelligent fusion),
+            'mercury_priority' (Mercury always overwrites), 'preserve_existing'
+            (only fill empty fields). LLM validation uses OpenRouter when enabled.
+            On Windows, configures ProactorEventLoop for async operations.
+            Delegates to readable_pipeline.run_readable_pipeline.
         """
         core.check_args(args, 'name')
         
@@ -657,10 +886,29 @@ class LandController:
 
     @staticmethod
     def export(args: core.Namespace):
-        """
-        Export land
-        :param args:
-        :return:
+        """Export land data in various formats.
+
+        Exports expressions, links, nodes, media, or corpus data from the
+        specified land in formats suitable for analysis, visualization, or
+        processing.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                arguments are 'name' (land name) and 'type' (export format).
+                Optional argument 'minrel' (minimum relevance) filters
+                expressions.
+
+        Returns:
+            int: 1 if export completed successfully, 0 if land not found or
+                invalid export type specified.
+
+        Notes:
+            Valid export types: 'pagecsv' (page metadata CSV), 'fullpagecsv'
+            (full page content CSV), 'nodecsv' (nodes CSV), 'pagegexf' (page
+            network GEXF), 'nodegexf' (node network GEXF), 'mediacsv' (media
+            links CSV), 'corpus' (raw text corpus), 'pseudolinks' (embedding
+            similarity links), 'pseudolinkspage' (page-level pseudolinks),
+            'pseudolinksdomain' (domain-level pseudolinks).
         """
         minimum_relevance = 1
         core.check_args(args, ('name', 'type'))
@@ -684,10 +932,28 @@ class LandController:
 
     @staticmethod
     def llm_validate(args: core.Namespace):
-        """Validation de masse via OpenRouter pour un land.
+        """Perform bulk LLM validation for land expressions via OpenRouter.
 
-        Utilisation:
-          python mywi.py land llm validate --name=LAND [--limit=N]
+        Validates expressions using an LLM to determine relevance based on
+        readable content and land dictionary terms. Updates expressions with
+        validation verdict and sets relevance to 0 for non-relevant content.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional arguments include
+                'limit' (max expressions to validate) and 'force' (re-validate
+                expressions previously marked as non-relevant).
+
+        Returns:
+            int: 1 if validation completed successfully, 0 if OpenRouter not
+                enabled, configuration missing, or land not found.
+
+        Notes:
+            Requires settings.openrouter_enabled=True, settings.openrouter_api_key,
+            and settings.openrouter_model. Only processes expressions with
+            readable content longer than settings.openrouter_readable_min_chars.
+            Verdicts: 'oui' (relevant), 'non' (not relevant). With --force,
+            re-validates previously rejected expressions.
         """
         core.check_args(args, 'name')
 
@@ -763,7 +1029,27 @@ class EmbeddingController:
 
     @staticmethod
     def generate(args: core.Namespace):
-        """Generate paragraphs and embeddings for a land"""
+        """Generate paragraphs and embeddings for a land.
+
+        Extracts paragraphs from expression readable content and generates
+        vector embeddings for each paragraph using the configured embedding
+        provider.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional argument 'limit'
+                restricts the number of expressions to process.
+
+        Returns:
+            int: 1 if generation completed successfully, 0 if land not found.
+
+        Notes:
+            Uses the embedding provider specified in settings (fake, http,
+            openai, mistral, gemini, huggingface, or ollama). Paragraphs are
+            created by splitting readable content. Embeddings are stored in
+            the ParagraphEmbedding table. Displays counts of paragraphs and
+            embeddings created.
+        """
         core.check_args(args, 'name')
         limit = core.get_arg_option('limit', args, set_type=int, default=0)
         land = model.Land.get_or_none(model.Land.name == args.name)
@@ -777,7 +1063,30 @@ class EmbeddingController:
 
     @staticmethod
     def similarity(args: core.Namespace):
-        """Compute paragraph similarities within a land"""
+        """Compute paragraph similarities within a land.
+
+        Calculates similarity between paragraphs using cosine similarity,
+        LSH (locality-sensitive hashing), or NLI (natural language inference)
+        methods. Stores results as pseudolinks for network analysis.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                argument is 'name' (land name). Optional arguments include
+                'threshold' (similarity threshold), 'method' (similarity method),
+                'topk' (top K similar paragraphs), 'lshbits' (LSH bits),
+                'maxpairs' (maximum pairs to store), 'minrel' (minimum relevance),
+                and 'backend' (NLI backend).
+
+        Returns:
+            int: 1 if similarity computation completed successfully, 0 if land
+                not found.
+
+        Notes:
+            Methods: 'cosine' (vector similarity), 'cosine_lsh' (LSH-based),
+            'nli'/'ann+nli'/'semantic' (semantic similarity using cross-encoders).
+            For NLI methods, delegates to semantic_pipeline. For cosine methods,
+            delegates to embedding_pipeline. Results stored in ParagraphSimilarity.
+        """
         core.check_args(args, 'name')
         threshold = core.get_arg_option('threshold', args, set_type=float, default=None)
         method = core.get_arg_option('method', args, set_type=str, default=None)
@@ -816,7 +1125,26 @@ class EmbeddingController:
 
     @staticmethod
     def check(args: core.Namespace):
-        """Quick verify of embedding/NLI environment and settings"""
+        """Verify embedding and NLI environment and settings.
+
+        Performs diagnostic checks on the embedding and NLI configuration,
+        including provider settings, API keys, optional library availability,
+        and database table presence. Provides suggestions for missing components.
+
+        Args:
+            args: Namespace object containing command-line arguments (unused
+                but required for controller interface).
+
+        Returns:
+            int: 1 if all checks passed, 0 if critical issues detected.
+
+        Notes:
+            Checks embedding provider configuration (fake, http, openai, mistral,
+            gemini, huggingface, ollama) and validates API keys. Verifies optional
+            libraries (FAISS, sentence-transformers, transformers, torch) and
+            database tables (Paragraph, ParagraphEmbedding, ParagraphSimilarity).
+            Provides actionable suggestions for missing dependencies.
+        """
         import importlib
         ok = True
         suggestions = []
@@ -904,9 +1232,25 @@ class EmbeddingController:
 
     @staticmethod
     def reset(args: core.Namespace):
-        """Wipe embedding-related tables.
-        If --name is provided, only paragraphs belonging to that land are removed (cascades to embeddings + similarities).
-        If no --name is provided, ALL paragraphs are removed after confirmation.
+        """Wipe embedding-related tables for a land or globally.
+
+        Deletes paragraphs, embeddings, and similarities for a specific land
+        or all lands. Cascades deletion through related tables. Requires
+        confirmation for global reset.
+
+        Args:
+            args: Namespace object containing command-line arguments. Optional
+                argument 'name' (land name) limits deletion to that land.
+
+        Returns:
+            int: 1 if reset completed successfully or no data to delete, 0 if
+                land not found or user cancelled.
+
+        Notes:
+            When 'name' is provided, deletes only data for that land. Without
+            'name', deletes ALL embedding data after user confirmation (type 'Y').
+            Deletion is atomic and cascades: first similarities, then embeddings,
+            finally paragraphs. Reports counts of deleted records.
         """
         land_name = getattr(args, 'name', None)
         if land_name:
@@ -967,10 +1311,23 @@ class DomainController:
 
     @staticmethod
     def crawl(args: core.Namespace):
-        """
-        Crawl domains
-        :param args:
-        :return:
+        """Crawl domain-level metadata and information.
+
+        Fetches and updates metadata for domains in the database. Processes
+        domain homepage content and extracts relevant information.
+
+        Args:
+            args: Namespace object containing command-line arguments. Optional
+                arguments include 'limit' (max domains to process) and 'http'
+                (HTTP status filter).
+
+        Returns:
+            int: 1 indicating successful completion.
+
+        Notes:
+            Delegates to core.crawl_domains for the actual crawling logic.
+            Displays the count of domains processed. Useful for updating domain
+            metadata independently of expression crawling.
         """
         fetch_limit = core.get_arg_option('limit', args, set_type=int, default=0)
         http_status = core.get_arg_option('http', args, set_type=str, default=None)
@@ -985,10 +1342,26 @@ class TagController:
 
     @staticmethod
     def export(args: core.Namespace):
-        """
-        Export tags
-        :param args:
-        :return:
+        """Export tag-related data for a land.
+
+        Exports tags and tagged content from the specified land in various
+        formats suitable for analysis or visualization.
+
+        Args:
+            args: Namespace object containing command-line arguments. Required
+                arguments are 'name' (land name) and 'type' (export format).
+                Optional argument 'minrel' (minimum relevance) filters tagged
+                content.
+
+        Returns:
+            int: 1 if export completed successfully, 0 if land not found or
+                invalid export type specified.
+
+        Notes:
+            Valid export types: 'matrix' (tag co-occurrence matrix), 'content'
+            (tagged content snippets). Delegates to core.export_tags for the
+            actual export logic. Minimum relevance filter applies to the
+            expressions containing the tagged content.
         """
         minimum_relevance = 1
         core.check_args(args, ('name', 'type'))
@@ -1016,10 +1389,24 @@ class HeuristicController:
 
     @staticmethod
     def update(args: core.Namespace):
-        """
-        Update domains from specified heuristics
-        :param args:
-        :return:
+        """Update domains using specified heuristics.
+
+        Applies domain-specific heuristics from settings to update and enrich
+        domain information. Useful for extracting social media profiles or
+        other structured data from domain URLs.
+
+        Args:
+            args: Namespace object containing command-line arguments (unused
+                but required for controller interface).
+
+        Returns:
+            int: 1 indicating successful completion.
+
+        Notes:
+            Delegates to core.update_heuristic which processes domains according
+            to patterns defined in settings.heuristics. Heuristics typically
+            include regex patterns for extracting social media handles, RSS
+            feeds, or other domain-specific metadata.
         """
         core.update_heuristic()
         return 1

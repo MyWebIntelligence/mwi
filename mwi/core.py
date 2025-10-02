@@ -34,9 +34,19 @@ from . import model
 from .export import Export
 
 def _ensure_nltk_tokenizers() -> bool:
-    """Ensure required NLTK tokenizers are available, with resilient SSL and local cache.
+    """Ensure required NLTK tokenizers are available with resilient SSL and local cache.
 
-    Returns True if tokenizers are found or downloaded, False otherwise.
+    This function attempts to download and configure NLTK tokenizers ('punkt' and
+    'punkt_tab') needed for text processing. It configures SSL certificates for
+    platforms with certificate store issues and caches data in the project folder.
+
+    Returns:
+        bool: True if tokenizers are found or successfully downloaded, False otherwise.
+
+    Notes:
+        - Caches NLTK data in the project's data_location/nltk_data directory.
+        - Configures SSL using certifi to handle certificate issues on Windows/macOS.
+        - Silently handles errors to allow fallback tokenizers to be used.
     """
     # Prefer caching into the project data folder
     try:
@@ -74,7 +84,22 @@ if not _NLTK_OK:
     print("Warning: NLTK 'punkt'/'punkt_tab' not available; using a simple tokenizer fallback.")
 
 def _simple_word_tokenize(text: str) -> List[str]:
-    """Very small fallback tokenizer for French when NLTK data is unavailable."""
+    """Provide a simple fallback tokenizer for French when NLTK data is unavailable.
+
+    This lightweight tokenizer extracts sequences of letters (including accented
+    characters) from the input text and returns them as lowercase tokens.
+
+    Args:
+        text: The text to tokenize. Non-string inputs are converted to strings.
+
+    Returns:
+        list: A list of lowercase word tokens containing only letter sequences.
+
+    Notes:
+        - Used as a fallback when NLTK's punkt tokenizer is unavailable.
+        - Supports basic Latin-1 accented characters (À-ÖØ-öø-ÿ).
+        - Removes all non-letter characters (numbers, punctuation, etc.).
+    """
     if not isinstance(text, str):
         text = str(text)
     # Keep only letter sequences (incl. basic Latin-1 accents)
@@ -82,12 +107,26 @@ def _simple_word_tokenize(text: str) -> List[str]:
 
 
 async def extract_dynamic_medias(url: str, expression: model.Expression) -> list:
-    """
-    Extract media URLs from a webpage using a headless browser to execute JavaScript
-    and capture dynamically generated media URLs
-    :param url: URL to extract media from
-    :param expression: The expression object to associate media with
-    :return: List of media URLs found after JavaScript execution
+    """Extract media URLs from a webpage using a headless browser.
+
+    This function uses Playwright to execute JavaScript on a webpage and capture
+    dynamically generated media URLs including images, videos, and audio files.
+    It also handles lazy-loaded images using common data attributes.
+
+    Args:
+        url: The URL of the webpage to extract media from.
+        expression: The Expression database object to associate extracted media with.
+
+    Returns:
+        list: A list of media URLs (strings) found after JavaScript execution.
+
+    Notes:
+        - Requires Playwright to be installed and available.
+        - Returns empty list if Playwright is not available.
+        - Waits for network idle and additional 3 seconds for dynamic content.
+        - Detects lazy-loaded images via data-src, data-lazy-src, etc.
+        - Automatically saves new media to the database.
+        - Resolves relative URLs to absolute URLs.
     """
     if not PLAYWRIGHT_AVAILABLE:
         print(f"Playwright not available, skipping dynamic media extraction for {url}")
@@ -191,11 +230,22 @@ async def extract_dynamic_medias(url: str, expression: model.Expression) -> list
 
 
 def resolve_url(base_url: str, relative_url: str) -> str:
-    """
-    Resolve relative URL to absolute URL using the base URL
-    :param base_url: The base URL (page URL)
-    :param relative_url: The relative or absolute URL to resolve
-    :return: Absolute URL
+    """Resolve a relative URL to an absolute URL using the base URL.
+
+    This function converts relative URLs to absolute URLs using urllib's urljoin.
+    URLs are normalized to lowercase for consistency.
+
+    Args:
+        base_url: The base URL (typically the page URL containing the link).
+        relative_url: The relative or absolute URL to resolve.
+
+    Returns:
+        str: The resolved absolute URL in lowercase.
+
+    Notes:
+        - Already absolute URLs (starting with http:// or https://) are returned as-is.
+        - All returned URLs are converted to lowercase for consistency.
+        - Errors during resolution are logged and the relative URL is returned.
     """
     try:
         # If already absolute, return as is (but lowercase for consistency)
@@ -211,20 +261,42 @@ def resolve_url(base_url: str, relative_url: str) -> str:
 
 
 def confirm(message: str) -> bool:
-    """
-    Confirms action by requesting right input from user
-    :param message:
-    :return:
+    """Confirm an action by requesting user input.
+
+    This function displays a message to the user and expects 'Y' as confirmation.
+
+    Args:
+        message: The confirmation message to display to the user.
+
+    Returns:
+        bool: True if the user enters 'Y', False otherwise.
+
+    Notes:
+        - Only the exact character 'Y' (uppercase) confirms the action.
+        - Any other input (including 'y', 'yes', etc.) returns False.
     """
     return input(message) == 'Y'
 
 
 def check_args(args: Namespace, mandatory) -> bool:
-    """
-    Returns True if all required args are in parsed input args
-    :param args:
-    :param mandatory:
-    :return:
+    """Validate that all required arguments are present in parsed input arguments.
+
+    This function checks whether mandatory arguments are present and non-None in
+    the provided Namespace object from argparse.
+
+    Args:
+        args: The argparse Namespace object containing parsed arguments.
+        mandatory: A string or list of strings representing required argument names.
+
+    Returns:
+        bool: True if all mandatory arguments are present and non-None.
+
+    Raises:
+        ValueError: If any mandatory argument is missing or None.
+
+    Notes:
+        - Accepts either a single string or list of strings for mandatory args.
+        - Converts args Namespace to dictionary for validation.
     """
     args_dict = vars(args)
     if isinstance(mandatory, str):
@@ -236,23 +308,43 @@ def check_args(args: Namespace, mandatory) -> bool:
 
 
 def split_arg(arg: str) -> list:
-    """
-    Splits arg string using comma separator and returns a filtered list
-    :param arg:
-    :return:
+    """Split an argument string using comma separator and return a filtered list.
+
+    This function splits a comma-separated string into individual arguments,
+    stripping whitespace and filtering out empty strings.
+
+    Args:
+        arg: A comma-separated string of arguments.
+
+    Returns:
+        list: A list of non-empty strings with leading/trailing whitespace removed.
+
+    Notes:
+        - Empty strings after splitting are filtered out.
+        - Each element is stripped of leading and trailing whitespace.
     """
     args = arg.split(",")
     return [a.strip() for a in args if a]
 
 
 def get_arg_option(name: str, args: Namespace, set_type, default):
-    """
-    Returns value from optional argument
-    :param name:
-    :param args:
-    :param set_type:
-    :param default:
-    :return:
+    """Retrieve and type-cast an optional argument value with a default fallback.
+
+    This function extracts an optional argument from the parsed args, applies a
+    type conversion function, and returns a default value if the argument is missing.
+
+    Args:
+        name: The name of the argument to retrieve.
+        args: The argparse Namespace object containing parsed arguments.
+        set_type: A callable to convert the argument value to the desired type.
+        default: The default value to return if the argument is missing or None.
+
+    Returns:
+        The argument value converted using set_type, or the default value.
+
+    Notes:
+        - Returns default if argument is not present or is None.
+        - set_type can be any callable (int, str, bool, custom function, etc.).
     """
     args_dict = vars(args)
     if (name in args_dict) and (args_dict[name] is not None):
@@ -530,7 +622,24 @@ def prefer_earlier_datetime(
     current_value: Optional[datetime],
     candidate: Optional[datetime]
 ) -> Optional[datetime]:
-    """Return the earliest non-null datetime between ``current`` and ``candidate``."""
+    """Return the earliest non-null datetime between current and candidate values.
+
+    This utility function compares two optional datetime values and returns the
+    earlier one, handling None values gracefully.
+
+    Args:
+        current_value: The current datetime value, or None.
+        candidate: The candidate datetime value to compare, or None.
+
+    Returns:
+        Optional[datetime]: The earlier of the two datetimes, or the non-None value
+            if only one is provided, or None if both are None.
+
+    Notes:
+        - If both values are None, returns None.
+        - If one value is None, returns the other value.
+        - If both values are non-None, returns the earlier datetime.
+    """
 
     if candidate is None:
         return current_value
@@ -540,6 +649,21 @@ def prefer_earlier_datetime(
 
 
 def _serpapi_page_size(engine: str) -> int:
+    """Return the maximum page size for a given SerpAPI search engine.
+
+    Different search engines support different maximum result counts per page.
+    This function returns the appropriate page size for each engine.
+
+    Args:
+        engine: The search engine name (e.g., 'google', 'bing', 'duckduckgo').
+
+    Returns:
+        int: The maximum page size (100 for Google, 50 for others).
+
+    Notes:
+        - Google supports up to 100 results per page.
+        - Other engines (Bing, DuckDuckGo) default to 50 results per page.
+    """
     if engine == 'google':
         return 100
     return 50
@@ -554,6 +678,30 @@ def _build_serpapi_params(
     window_end: Optional[date] = None,
     use_date_filter: bool = False
 ) -> Dict[str, Union[str, int]]:
+    """Build engine-specific query parameters for SerpAPI requests.
+
+    This function constructs the appropriate query parameters for different search
+    engines (Google, Bing, DuckDuckGo) with language settings and pagination.
+
+    Args:
+        engine: The search engine name ('google', 'bing', or 'duckduckgo').
+        lang: Language code for localization (e.g., 'fr', 'en').
+        start_index: The starting index for pagination (0-based).
+        page_size: Maximum number of results per page.
+        window_start: Optional start date for date-filtered searches.
+        window_end: Optional end date for date-filtered searches.
+        use_date_filter: Whether date filtering is being applied.
+
+    Returns:
+        Dict[str, Union[str, int]]: A dictionary of query parameters specific to
+            the chosen search engine.
+
+    Notes:
+        - Google uses 'start', 'num', 'gl', 'hl', 'lr' parameters.
+        - Bing uses 'mkt', 'count', 'first' parameters (1-indexed).
+        - DuckDuckGo uses 'kl', 'start', 'm', 'df' parameters.
+        - Date filters are only applied for DuckDuckGo via 'df' parameter.
+    """
     normalized_lang = (lang or 'fr').strip().lower() or 'fr'
 
     if engine == 'google':
@@ -594,7 +742,28 @@ def _build_serpapi_windows(
     dateend: Optional[str],
     timestep: str
 ) -> List[Tuple[date, date]]:
-    """Return inclusive date windows matching the R helper behaviour."""
+    """Generate inclusive date windows for time-based search iteration.
+
+    This function splits a date range into smaller windows based on the specified
+    timestep, matching the behavior of the original R helper implementation.
+
+    Args:
+        datestart: Start date in YYYY-MM-DD format, or None.
+        dateend: End date in YYYY-MM-DD format, or None.
+        timestep: Window size ('day', 'week', or 'month').
+
+    Returns:
+        List[Tuple[date, date]]: A list of (start_date, end_date) tuples representing
+            inclusive date windows, or empty list if dates are not provided.
+
+    Raises:
+        SerpApiError: If datestart is later than dateend.
+
+    Notes:
+        - Returns empty list if either datestart or dateend is None.
+        - Each window is inclusive of both start and end dates.
+        - Last window may be shorter to fit within the overall date range.
+    """
 
     if not datestart or not dateend:
         return []
@@ -618,7 +787,26 @@ def _build_serpapi_windows(
 
 
 def _advance_date(current: date, timestep: str) -> date:
-    """Advance ``current`` by the given timestep (day|week|month)."""
+    """Advance a date by the specified timestep increment.
+
+    This function adds a time increment to the current date based on the timestep
+    parameter, handling month boundaries correctly.
+
+    Args:
+        current: The date to advance.
+        timestep: The increment type ('day', 'week', or 'month').
+
+    Returns:
+        date: The advanced date.
+
+    Raises:
+        SerpApiError: If timestep is not one of 'day', 'week', or 'month'.
+
+    Notes:
+        - 'day' advances by 1 day.
+        - 'week' advances by 7 days.
+        - 'month' advances by 1 month, handling month-end edge cases correctly.
+    """
 
     if timestep == 'day':
         return current + timedelta(days=1)
@@ -633,7 +821,24 @@ def _advance_date(current: date, timestep: str) -> date:
 
 
 def _parse_serpapi_date(value: str) -> date:
-    """Parse a YYYY-MM-DD string into a ``date`` and validate the format."""
+    """Parse a YYYY-MM-DD string into a date object and validate the format.
+
+    This function converts a date string in ISO format (YYYY-MM-DD) to a Python
+    date object, raising an error if the format is invalid.
+
+    Args:
+        value: A date string in YYYY-MM-DD format.
+
+    Returns:
+        date: The parsed date object.
+
+    Raises:
+        SerpApiError: If the date string is not in valid YYYY-MM-DD format.
+
+    Notes:
+        - Only accepts ISO format (YYYY-MM-DD).
+        - Validates both format and date validity (e.g., rejects 2023-02-30).
+    """
 
     try:
         return datetime.strptime(value, '%Y-%m-%d').date()
@@ -642,7 +847,23 @@ def _parse_serpapi_date(value: str) -> date:
 
 
 def _build_serpapi_tbs(start: date, end: date) -> str:
-    """Build the Google ``tbs`` parameter encoding a closed date range."""
+    """Build the Google tbs parameter encoding a closed date range.
+
+    This function constructs the Google-specific 'tbs' (to-be-searched) parameter
+    that encodes a custom date range for search filtering.
+
+    Args:
+        start: The start date of the range (inclusive).
+        end: The end date of the range (inclusive).
+
+    Returns:
+        str: A formatted tbs parameter string for Google Search API.
+
+    Notes:
+        - Format: 'cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY'
+        - 'cdr:1' enables custom date range filtering.
+        - Dates are formatted as MM/DD/YYYY for Google's API.
+    """
 
     return 'cdr:1,cd_min:{},cd_max:{}'.format(
         start.strftime('%m/%d/%Y'),
@@ -651,7 +872,22 @@ def _build_serpapi_tbs(start: date, end: date) -> str:
 
 
 def _serpapi_google_domain(lang: str) -> str:
-    """Return a Google domain TLD matching the language heuristic."""
+    """Return a Google domain TLD matching the language code.
+
+    This function maps language codes to appropriate Google domain TLDs for
+    localized search results.
+
+    Args:
+        lang: A language code (e.g., 'fr', 'en').
+
+    Returns:
+        str: The Google domain TLD (e.g., 'google.fr', 'google.com').
+
+    Notes:
+        - 'fr' maps to 'google.fr' for French results.
+        - 'en' maps to 'google.com' for English results.
+        - Defaults to 'google.com' for unrecognized language codes.
+    """
 
     lang = lang.lower()
     if lang == 'fr':
@@ -662,7 +898,22 @@ def _serpapi_google_domain(lang: str) -> str:
 
 
 def _serpapi_bing_market(lang: str) -> str:
-    """Return the Bing market matching the requested language."""
+    """Return the Bing market code matching the requested language.
+
+    This function maps language codes to Bing market identifiers for localized
+    search results.
+
+    Args:
+        lang: A language code (e.g., 'fr', 'en').
+
+    Returns:
+        str: The Bing market code (e.g., 'fr-FR', 'en-US').
+
+    Notes:
+        - 'fr' maps to 'fr-FR' for French market.
+        - 'en' maps to 'en-US' for English/US market.
+        - Defaults to 'en-US' for unrecognized language codes.
+    """
 
     mapping = {
         'fr': 'fr-FR',
@@ -672,7 +923,22 @@ def _serpapi_bing_market(lang: str) -> str:
 
 
 def _serpapi_duckduckgo_region(lang: str) -> str:
-    """Return the DuckDuckGo region code for the given language."""
+    """Return the DuckDuckGo region code for the given language.
+
+    This function maps language codes to DuckDuckGo region identifiers for
+    localized search results.
+
+    Args:
+        lang: A language code (e.g., 'fr', 'en').
+
+    Returns:
+        str: The DuckDuckGo region code (e.g., 'fr-fr', 'us-en').
+
+    Notes:
+        - 'fr' maps to 'fr-fr' for French region.
+        - 'en' maps to 'us-en' for US English region.
+        - Defaults to 'us-en' for unrecognized language codes.
+    """
 
     mapping = {
         'fr': 'fr-fr',
@@ -682,7 +948,26 @@ def _serpapi_duckduckgo_region(lang: str) -> str:
 
 
 def fetch_seorank_for_url(url: str, api_key: str) -> Optional[dict]:
-    """Call the SEO Rank API for a single URL and return the JSON payload."""
+    """Call the SEO Rank API for a single URL and return the JSON payload.
+
+    This function makes an HTTP request to the SEO Rank API to fetch metrics
+    (Moz, SimilarWeb, Facebook) for a given URL.
+
+    Args:
+        url: The URL to fetch SEO metrics for.
+        api_key: The API key for authenticating with the SEO Rank service.
+
+    Returns:
+        Optional[dict]: A dictionary containing the JSON response from the API,
+            or None if the request fails.
+
+    Notes:
+        - Uses URL-safe encoding for the URL parameter.
+        - Default base URL is 'https://seo-rank.my-addr.com/api2/moz+sr+fb'.
+        - Configurable via settings.seorank_api_base_url.
+        - Timeout is configurable via settings.seorank_timeout (default 15s).
+        - Prints error messages for HTTP failures or JSON parsing errors.
+    """
     base_url = getattr(settings, 'seorank_api_base_url', '').strip()
     if not base_url:
         base_url = 'https://seo-rank.my-addr.com/api2/moz+sr+fb'
@@ -717,7 +1002,31 @@ def update_seorank_for_land(
     min_relevance: int = 1,
     force_refresh: bool = False,
 ) -> tuple[int, int]:
-    """Fetch SEO Rank data for land expressions and store the raw JSON payload."""
+    """Fetch SEO Rank data for land expressions and store the raw JSON payload.
+
+    This function processes expressions in a land, fetches SEO metrics from the
+    SEO Rank API, and stores the results in the database.
+
+    Args:
+        land: The Land object containing expressions to process.
+        api_key: The API key for the SEO Rank service.
+        limit: Maximum number of expressions to process (0 for unlimited).
+        depth: Optional crawl depth filter (None for all depths).
+        http_status: Filter by HTTP status code ('200', 'all', or specific code).
+        min_relevance: Minimum relevance score filter (default 1).
+        force_refresh: Whether to refresh existing seorank data (default False).
+
+    Returns:
+        tuple[int, int]: A tuple of (processed_count, updated_count) indicating
+            how many expressions were processed and how many were successfully updated.
+
+    Notes:
+        - By default, only processes expressions without existing seorank data.
+        - Use force_refresh=True to re-fetch data for all expressions.
+        - Adds configurable delay between requests (settings.seorank_request_delay).
+        - Filters by HTTP status (defaults to '200' if not specified).
+        - Skips expressions with None relevance if min_relevance > 0.
+    """
     expressions = model.Expression.select().where(model.Expression.land == land)
 
     if depth is not None:
@@ -757,10 +1066,22 @@ def update_seorank_for_land(
 
 
 def stem_word(word: str) -> str:
-    """
-    Stems word with NLTK Snowball FrenchStemmer
-    :param word:
-    :return:
+    """Stem a word using NLTK Snowball FrenchStemmer.
+
+    This function reduces a French word to its root form (stem) using the NLTK
+    Snowball stemmer for French. The stemmer is cached as a function attribute.
+
+    Args:
+        word: The word to stem.
+
+    Returns:
+        str: The stemmed word in lowercase.
+
+    Notes:
+        - Uses NLTK's Snowball French Stemmer.
+        - The stemmer instance is cached in the function's attributes.
+        - Input is automatically converted to lowercase before stemming.
+        - Designed specifically for French language processing.
     """
     if not hasattr(stem_word, "stemmer"):
         setattr(stem_word, "stemmer", FrenchStemmer())
@@ -769,11 +1090,27 @@ def stem_word(word: str) -> str:
 
 
 def crawl_domains(limit: int = 0, http: Optional[str] = None):
-    """
-    Crawl domains to retrieve info using a pipeline: Trafilatura, Archive.org, then direct requests.
-    :param limit: Max number of domains to process.
-    :param http: Filter by specific HTTP status (for recrawling).
-    :return: Number of successfully processed domains.
+    """Crawl domains to retrieve metadata using a multi-strategy pipeline.
+
+    This function processes domains through a three-stage pipeline: Trafilatura,
+    Archive.org, and direct HTTP requests. It extracts title, description, and
+    keywords from each domain's homepage.
+
+    Args:
+        limit: Maximum number of domains to process (0 for unlimited).
+        http: Optional HTTP status code filter for recrawling specific domains.
+
+    Returns:
+        int: The number of successfully processed domains.
+
+    Notes:
+        - Pipeline order: (1) Trafilatura, (2) Archive.org, (3) Direct requests.
+        - Trafilatura tries HTTPS then HTTP automatically.
+        - Archive.org provides historical snapshots if live site is unavailable.
+        - Direct requests attempt both HTTPS and HTTP protocols.
+        - Extracts metadata using BeautifulSoup and Trafilatura.
+        - Updates domain.fetched_at, domain.http_status, and metadata fields.
+        - Sets custom error codes (ERR_TRAFI, ERR_ARCHIVE, etc.) for failures.
     """
     domains_query = model.Domain.select()
     if limit > 0:
@@ -935,13 +1272,24 @@ def crawl_domains(limit: int = 0, http: Optional[str] = None):
 
 
 def process_domain_content(domain: model.Domain, html_content: str, effective_url: str, source_method: str):
-    """
-    Process domain info from HTML content obtained via the pipeline.
-    Uses enhanced metadata extraction (BeautifulSoup helpers and Trafilatura).
-    :param domain: The domain object to update.
-    :param html_content: The HTML content of the domain's page.
-    :param effective_url: The URL from which the content was actually fetched (could be live or archive).
-    :param source_method: String indicating how content was obtained (e.g., "TRAFILATURA", "ARCHIVE_ORG", "REQUESTS").
+    """Process and extract metadata from domain HTML content.
+
+    This function extracts title, description, and keywords from HTML content
+    using both BeautifulSoup and Trafilatura, combining results with priority.
+
+    Args:
+        domain: The Domain database object to update with extracted metadata.
+        html_content: The HTML content of the domain's homepage.
+        effective_url: The URL from which content was fetched (live or archived).
+        source_method: Source indicator ('TRAFILATURA', 'ARCHIVE_ORG', 'REQUESTS').
+
+    Notes:
+        - Combines metadata from BeautifulSoup and Trafilatura extraction.
+        - Trafilatura results take priority over BeautifulSoup results.
+        - Extracts Open Graph, Twitter Card, and schema.org metadata.
+        - Falls back to generic title if no metadata is found.
+        - Updates domain.title, domain.description, and domain.keywords fields.
+        - Prints extraction results for debugging.
     """
     # 1. Use BeautifulSoup based helpers (og: twitter: schema: etc.)
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -996,11 +1344,22 @@ def process_domain_content(domain: model.Domain, html_content: str, effective_ur
 
 
 def get_meta_content(soup: BeautifulSoup, name: str) -> str:
-    """
-    Get named meta content property
-    :param soup:
-    :param name:
-    :return:
+    """Extract content from a named meta tag.
+
+    This function searches for a meta tag with the specified name attribute
+    and returns its content value.
+
+    Args:
+        soup: A BeautifulSoup object containing parsed HTML.
+        name: The value of the 'name' attribute to search for.
+
+    Returns:
+        str: The content of the meta tag, or empty string if not found.
+
+    Notes:
+        - Only returns string content values.
+        - Strips leading and trailing whitespace from content.
+        - Logs found content to console for debugging (first 30 chars).
     """
     tag = soup.find('meta', attrs={'name': name})
     if tag and tag.has_attr('content'): # type: ignore
@@ -1012,10 +1371,24 @@ def get_meta_content(soup: BeautifulSoup, name: str) -> str:
 
 
 def extract_metadata(url: str) -> dict:
-    """
-    Extract metadata from webpage with multiple fallback sources
-    :param url: URL to extract metadata from
-    :return: Dictionary with title, description, and keywords (None if not found)
+    """Extract metadata from a webpage using multiple fallback sources.
+
+    This function fetches a webpage and extracts title, description, and keywords
+    using helper functions that check multiple meta tag sources.
+
+    Args:
+        url: The URL of the webpage to extract metadata from.
+
+    Returns:
+        dict: A dictionary with keys 'title', 'description', and 'keywords'.
+            Values are strings or None if extraction fails.
+
+    Notes:
+        - Automatically adds 'https://' protocol if missing from URL.
+        - Uses get_title(), get_description(), and get_keywords() helpers.
+        - Returns None values for all fields if request fails.
+        - Timeout is set to 5 seconds.
+        - Logs extraction progress and errors to console.
     """
     try:
         # Ensure URL has a protocol
@@ -1044,10 +1417,22 @@ def extract_metadata(url: str) -> dict:
 
 
 def get_title(soup: BeautifulSoup) -> str:
-    """
-    Get page title with fallback chain
-    :param soup: BeautifulSoup object
-    :return: Title string or empty string if not found
+    """Extract page title using a fallback chain of meta tag sources.
+
+    This function searches for the page title in multiple locations with priority
+    given to Open Graph, then Twitter Card, then schema.org, and finally standard HTML title.
+
+    Args:
+        soup: A BeautifulSoup object containing parsed HTML.
+
+    Returns:
+        str: The page title, or empty string if no title is found.
+
+    Notes:
+        - Priority order: og:title > twitter:title > schema.org title > <title> tag.
+        - Returns the first non-empty title found in the priority order.
+        - Strips leading and trailing whitespace from the title.
+        - Empty string is returned if no title source is found.
     """
     # Open Graph title (highest priority)
     og_title = soup.find('meta', attrs={'property': 'og:title'})
@@ -1078,10 +1463,24 @@ def get_title(soup: BeautifulSoup) -> str:
 
 
 def get_description(soup: BeautifulSoup) -> str:
-    """
-    Get page description with fallback chain
-    :param soup: BeautifulSoup object
-    :return: Description string or empty string if not found
+    """Extract page description using a fallback chain of meta tag sources.
+
+    This function searches for the page description in multiple meta tag locations
+    with priority to standard meta description, then Open Graph, Twitter Card,
+    and schema.org.
+
+    Args:
+        soup: A BeautifulSoup object containing parsed HTML.
+
+    Returns:
+        str: The page description, or empty string if no description is found.
+
+    Notes:
+        - Priority order: meta[name="description"] > og:description >
+          twitter:description > schema.org description.
+        - Returns the first non-empty description found in the priority order.
+        - Strips leading and trailing whitespace from the description.
+        - Empty string is returned if no description source is found.
     """
     # Standard meta description
     meta_desc = soup.find('meta', attrs={'name': 'description'})
@@ -1115,10 +1514,23 @@ def get_description(soup: BeautifulSoup) -> str:
 
 
 def get_keywords(soup: BeautifulSoup) -> str:
-    """
-    Get page keywords with fallback chain
-    :param soup: BeautifulSoup object
-    :return: Keywords string or empty string if not found
+    """Extract page keywords using a fallback chain of meta tag sources.
+
+    This function searches for page keywords in multiple meta tag locations with
+    priority to standard meta keywords, then Open Graph and Twitter Card variations.
+
+    Args:
+        soup: A BeautifulSoup object containing parsed HTML.
+
+    Returns:
+        str: A comma-separated string of keywords, or empty string if not found.
+
+    Notes:
+        - Priority order: meta[name="keywords"] > og:keywords > twitter:keywords.
+        - Returns the first non-empty keywords found in the priority order.
+        - Strips leading and trailing whitespace from the keywords string.
+        - Empty string is returned if no keywords source is found.
+        - Note: og:keywords and twitter:keywords are rare in practice.
     """
     # Standard meta keywords
     meta_keywords = soup.find('meta', attrs={'name': 'keywords'})
@@ -1145,13 +1557,27 @@ def get_keywords(soup: BeautifulSoup) -> str:
 
 
 async def crawl_land(land: model.Land, limit: int = 0, http: Optional[str] = None, depth: Optional[int] = None) -> tuple:
-    """
-    Start land crawl
-    :param land:
-    :param limit:
-    :param http:
-    :param depth: Only crawl expressions at this depth (if not None)
-    :return:
+    """Asynchronously crawl all expressions in a land.
+
+    This function orchestrates the crawling process for a land, processing
+    expressions depth by depth with concurrent HTTP requests and media analysis.
+
+    Args:
+        land: The Land object to crawl.
+        limit: Maximum number of expressions to crawl (0 for unlimited).
+        http: Optional HTTP status filter for recrawling specific expressions.
+        depth: Optional depth filter to crawl only expressions at this depth level.
+
+    Returns:
+        tuple: A tuple of (total_processed, total_errors) counts.
+
+    Notes:
+        - Processes expressions depth by depth in ascending order.
+        - Uses asynchronous HTTP requests for efficient crawling.
+        - Includes media analysis if enabled in settings.
+        - Respects parallel connection limits from settings.
+        - Updates expression metadata, content, relevance, and links.
+        - Handles different event loop policies for Windows vs Unix.
     """
     print(f"Crawling land {land.id}") # type: ignore
     dictionary = get_land_dictionary(land)
@@ -1243,12 +1669,27 @@ async def crawl_land(land: model.Land, limit: int = 0, http: Optional[str] = Non
     return total_processed, total_errors
 
 async def crawl_expression_with_media_analysis(expression: model.Expression, dictionary, session: aiohttp.ClientSession):
-    """
-    Crawl and process an expression with media analysis
-    :param expression: The expression to process.
-    :param dictionary: The land's word dictionary for relevance.
-    :param session: aiohttp.ClientSession for requests.
-    :return: 1 if content was processed, 0 on failure.
+    """Crawl and process an expression with integrated media analysis.
+
+    This function fetches an expression's URL, extracts content using Trafilatura,
+    analyzes media elements, and updates the expression in the database.
+
+    Args:
+        expression: The Expression database object to process.
+        dictionary: The land's word dictionary for relevance scoring.
+        session: An aiohttp ClientSession for making HTTP requests.
+
+    Returns:
+        int: 1 if content was successfully processed, 0 on failure.
+
+    Notes:
+        - Fetches URL content via direct HTTP request.
+        - Extracts main content using Trafilatura with markdown and HTML formats.
+        - Analyzes embedded media (images, videos, audio) in readable content.
+        - Falls back to raw HTML content processing if Trafilatura fails.
+        - Updates expression.http_status, expression.content, and expression.relevance.
+        - Automatically calls analyze_media() for media extraction and analysis.
+        - Sets fetched_at timestamp on the expression.
     """
     print(f"Crawling expression #{expression.id} with media analysis: {expression.url}") # type: ignore
     content = None
@@ -1442,13 +1883,27 @@ async def consolidate_land(
     depth: Optional[int] = None,
     min_relevance: int = 0,
 ) -> tuple:
-    """
-    Consolidate a land: for each expression, recalculate relevance, links, media, add missing docs, recreate links, replace old ones.
-    :param land:
-    :param limit:
-    :param depth: Only process expressions at this depth (if not None)
-    :param min_relevance: Only consolidate expressions whose current relevance meets this threshold
-    :return: (number of expressions consolidated, number of errors)
+    """Consolidate a land by reprocessing expressions and rebuilding relationships.
+
+    This function recalculates relevance scores, extracts links and media from
+    existing content, and repairs the expression graph after external modifications.
+
+    Args:
+        land: The Land object to consolidate.
+        limit: Maximum number of expressions to process (0 for unlimited).
+        depth: Optional depth filter to process only expressions at this depth.
+        min_relevance: Minimum relevance threshold for expressions to process.
+
+    Returns:
+        tuple: A tuple of (total_processed, total_errors) counts.
+
+    Notes:
+        - Only processes expressions that have been approved or have readable content.
+        - Recalculates relevance scores based on current land dictionary.
+        - Deletes and recreates all expression links from content.
+        - Extracts and analyzes media from existing content.
+        - Useful for repairing data after manual content edits or dictionary updates.
+        - Does not re-fetch URLs; works with existing content in the database.
     """
     print(f"Consolidating land {land.id}") # type: ignore
     dictionary = get_land_dictionary(land)
@@ -1542,13 +1997,27 @@ async def consolidate_land(
 
 
 async def crawl_expression(expression: model.Expression, dictionary, session: aiohttp.ClientSession):
-    """
-    Crawl and process an expression using a robust pipeline, while preserving the original HTTP status code.
-    Pipeline: Direct Fetch -> [Trafilatura -> BS] -> Fallbacks [Mercury -> Archive]
-    :param expression: The expression to process.
-    :param dictionary: The land's word dictionary for relevance.
-    :param session: aiohttp.ClientSession for requests.
-    :return: 1 if content was processed, 0 on failure.
+    """Crawl and process an expression using a multi-stage fallback pipeline.
+
+    This function fetches and processes web content through a sophisticated pipeline
+    with multiple extraction methods and fallback strategies.
+
+    Args:
+        expression: The Expression database object to process.
+        dictionary: The land's word dictionary for relevance scoring.
+        session: An aiohttp ClientSession for making HTTP requests.
+
+    Returns:
+        int: 1 if content was successfully processed, 0 on failure.
+
+    Notes:
+        - Pipeline stages: Direct fetch -> Trafilatura -> BeautifulSoup -> Mercury -> Archive.org
+        - Preserves original HTTP status code throughout the pipeline.
+        - Extracts links from content for building the expression graph.
+        - Calculates relevance score using the land's dictionary.
+        - Updates expression.http_status, expression.content, and expression.relevance.
+        - Sets fetched_at timestamp on the expression.
+        - Deprecated in favor of crawl_expression_with_media_analysis.
     """
     print(f"Crawling expression #{expression.id}: {expression.url}") # type: ignore
     content = None
@@ -1750,11 +2219,25 @@ async def crawl_expression(expression: model.Expression, dictionary, session: ai
     return 1
 
 async def analyze_media(expression: model.Expression, session: aiohttp.ClientSession) -> list:
-    """
-    Analyze media for an expression using MediaAnalyzer
-    :param expression: The expression to analyze media for
-    :param session: aiohttp.ClientSession for requests.
-    :return: List of analyzed media items
+    """Analyze and extract detailed metadata for media associated with an expression.
+
+    This function processes all media items linked to an expression, fetching and
+    analyzing their properties using the MediaAnalyzer.
+
+    Args:
+        expression: The Expression database object whose media should be analyzed.
+        session: An aiohttp ClientSession for downloading media files.
+
+    Returns:
+        list: A list of successfully analyzed media items.
+
+    Notes:
+        - Uses MediaAnalyzer for comprehensive media analysis.
+        - Extracts metadata like dimensions, colors, format, EXIF data, etc.
+        - Calculates perceptual hashes for duplicate detection.
+        - Updates Media database records with analysis results.
+        - Requires settings.media_analysis to be enabled.
+        - Returns empty list if no media is found or analysis fails.
     """
     from .media_analyzer import MediaAnalyzer
     media_settings = {
@@ -1811,10 +2294,22 @@ async def analyze_media(expression: model.Expression, session: aiohttp.ClientSes
 
 
 def extract_md_links(md_content: str):
-    """
-    Extract URLs from Markdown content, en retirant toute parenthèse fermante finale non appariée
-    :param md_content:
-    :return:
+    """Extract URLs from Markdown content with proper parenthesis handling.
+
+    This function finds all URLs in Markdown link syntax and removes unmatched
+    closing parentheses from the end of URLs.
+
+    Args:
+        md_content: A string containing Markdown-formatted content.
+
+    Returns:
+        list: A list of URL strings extracted from the Markdown content.
+
+    Notes:
+        - Matches URLs in Markdown link format: (http://example.com)
+        - Supports http, https, and ftp protocols.
+        - Removes unmatched closing parentheses from URL ends.
+        - Handles edge case where URLs contain parentheses in parameters.
     """
     matches = re.findall(r'\(((https?|ftp)://[^\s/$.?#].[^\s]*)\)', md_content)
     urls = []
@@ -1828,12 +2323,26 @@ def extract_md_links(md_content: str):
 
 
 def add_expression(land: model.Land, url: str, depth=0) -> Union[model.Expression, bool]:
-    """
-    Add expression to land
-    :param land:
-    :param url:
-    :param depth:
-    :return:
+    """Add a new expression (URL) to a land or retrieve existing one.
+
+    This function creates a new expression in the database if it doesn't exist,
+    or retrieves the existing expression for the same URL in the land.
+
+    Args:
+        land: The Land object to add the expression to.
+        url: The URL of the expression.
+        depth: The crawl depth level (default 0 for seed URLs).
+
+    Returns:
+        Union[model.Expression, bool]: The Expression object if successfully added
+            or retrieved, False if the URL is not crawlable.
+
+    Notes:
+        - Automatically removes URL anchors before processing.
+        - Checks if URL is crawlable using is_crawlable().
+        - Creates or retrieves the associated Domain object.
+        - Returns existing expression if URL already exists in the land.
+        - Returns False for non-crawlable URLs (PDFs, images, etc.).
     """
     url = remove_anchor(url)
     if is_crawlable(url):
@@ -1849,10 +2358,22 @@ def add_expression(land: model.Land, url: str, depth=0) -> Union[model.Expressio
 
 
 def get_domain_name(url: str) -> str:
-    """
-    Returns domain from any url as sub.domain.ext or according to heuristics settings
-    :param url:
-    :return:
+    """Extract the domain name from a URL with heuristic-based refinement.
+
+    This function extracts the domain from a URL and applies configured heuristics
+    to handle special cases like social media profile URLs or platform-specific patterns.
+
+    Args:
+        url: The URL to extract the domain from.
+
+    Returns:
+        str: The extracted domain name, possibly refined by heuristics.
+
+    Notes:
+        - Default extraction uses urllib's urlparse to get netloc.
+        - Applies heuristics from settings.heuristics for special domains.
+        - Heuristics can extract sub-paths (e.g., 'twitter.com/username').
+        - Useful for grouping URLs by logical domain/account.
     """
     parsed = urlparse(url)
     domain_name = parsed.netloc
@@ -1864,22 +2385,46 @@ def get_domain_name(url: str) -> str:
 
 
 def remove_anchor(url: str) -> str:
-    """
-    Removes anchor from URL
-    :param url:
-    :return:
+    """Remove the anchor (fragment) from a URL.
+
+    This function strips the hash fragment identifier from a URL, returning
+    only the base URL without the anchor portion.
+
+    Args:
+        url: The URL to process.
+
+    Returns:
+        str: The URL without the anchor portion, or the original URL if no anchor exists.
+
+    Notes:
+        - Removes everything after and including the '#' character.
+        - Returns the original URL if no '#' is found.
+        - Useful for deduplicating URLs that differ only by anchor.
     """
     anchor_pos = url.find('#')
     return url[:anchor_pos] if anchor_pos > 0 else url
 
 
 def link_expression(land: model.Land, source_expression: model.Expression, url: str) -> bool:
-    """
-    Link target expression to source expression
-    :param land:
-    :param source_expression:
-    :param url:
-    :return:
+    """Create a link from a source expression to a target expression.
+
+    This function adds a new expression for the target URL and creates a directed
+    link in the expression graph from source to target.
+
+    Args:
+        land: The Land object containing both expressions.
+        source_expression: The Expression object that contains the link.
+        url: The URL of the target expression to link to.
+
+    Returns:
+        bool: True if the link was successfully created, False otherwise.
+
+    Notes:
+        - Automatically creates target expression with depth = source.depth + 1.
+        - Creates ExpressionLink record in the database.
+        - Handles IntegrityError silently (link already exists).
+        - Returns False if target URL is not crawlable.
+        - Builds the directed graph structure for land crawling.
     """
     target_expression = add_expression(land, url, source_expression.depth + 1) # type: ignore
     if target_expression:
@@ -1894,10 +2439,23 @@ def link_expression(land: model.Land, source_expression: model.Expression, url: 
 
 
 def is_crawlable(url: str):
-    """
-    Checks whether an URL is valid for crawling
-    :param url:
-    :return:
+    """Check whether a URL is valid and suitable for crawling.
+
+    This function validates URLs to ensure they are HTTP/HTTPS and do not point
+    to binary files or documents that should not be crawled.
+
+    Args:
+        url: The URL to validate.
+
+    Returns:
+        bool: True if the URL is crawlable, False otherwise.
+
+    Notes:
+        - Requires URL to start with 'http://' or 'https://'.
+        - Excludes URLs ending with image extensions (.jpg, .png, etc.).
+        - Excludes URLs ending with document extensions (.pdf, .doc, etc.).
+        - Excludes URLs ending with data files (.csv, .xlsx, etc.).
+        - Returns False for any URL that raises an exception during parsing.
     """
     try:
         parsed = urlparse(url)
@@ -1913,12 +2471,27 @@ def is_crawlable(url: str):
 
 
 def process_expression_content(expression: model.Expression, html: str, dictionary) -> model.Expression:
-    """
-    Process expression fields from HTML content
-    :param expression:
-    :param html:
-    :param dictionary:
-    :return:
+    """Process and extract metadata from HTML content for an expression.
+
+    This function extracts title, description, keywords, language, and content
+    from HTML, calculates relevance, and extracts media elements.
+
+    Args:
+        expression: The Expression database object to update.
+        html: The raw HTML content to process.
+        dictionary: The land's word dictionary for relevance scoring.
+
+    Returns:
+        model.Expression: The updated Expression object.
+
+    Notes:
+        - Extracts metadata using BeautifulSoup and enhanced extraction helpers.
+        - Calculates relevance score based on land dictionary word matches.
+        - Extracts language from HTML lang attribute.
+        - Falls back to domain-based title if no title is found.
+        - Extracts media elements (images, videos, audio) from content.
+        - Uses Trafilatura to extract clean readable content.
+        - Updates expression.title, description, keywords, lang, content, and relevance.
     """
     print(f"Processing expression #{expression.id}") # type: ignore
     soup = BeautifulSoup(html, 'html.parser')
@@ -2006,9 +2579,24 @@ def process_expression_content(expression: model.Expression, html: str, dictiona
 
 
 def extract_medias(content, expression: model.Expression):
-    """
-    Extract media references (img/video/audio) from HTML or markdown content linked to an expression.
-    Accepts either a BeautifulSoup object or raw text containing markdown markers.
+    """Extract media references from HTML or Markdown content and save to database.
+
+    This function identifies and extracts image, video, and audio URLs from content,
+    resolves them to absolute URLs, and creates Media database records.
+
+    Args:
+        content: Either a BeautifulSoup object or string containing HTML/Markdown.
+        expression: The Expression database object to associate media with.
+
+    Notes:
+        - Supports HTML <img>, <video>, and <audio> tags.
+        - Supports Markdown image syntax ![alt](url).
+        - Supports custom markers like [IMAGE: url], [VIDEO: url], [AUDIO: url].
+        - Handles srcset attribute for responsive images.
+        - Handles <source> elements within video/audio tags.
+        - Resolves relative URLs to absolute URLs using expression.url.
+        - Validates file extensions before creating media records.
+        - Prevents duplicate media entries for the same expression and URL.
     """
     print(f"Extracting media from #{expression.id}") # type: ignore
 
@@ -2081,10 +2669,24 @@ def extract_medias(content, expression: model.Expression):
 
 
 def get_readable(content):
-    """
-    Get readable part of HTML content, preserving media links as [IMAGE: url], [VIDEO: url], [AUDIO: url]
-    :param content:
-    :return:
+    """Extract readable text from HTML content while preserving media references.
+
+    This function extracts clean text from HTML while converting media elements
+    into text markers that can be later extracted.
+
+    Args:
+        content: A BeautifulSoup object containing HTML content.
+
+    Returns:
+        str: Clean text with media elements replaced by markers like [IMAGE: url].
+
+    Notes:
+        - Replaces <img> tags with [IMAGE: url] markers.
+        - Replaces <video> tags with [VIDEO: url] markers.
+        - Replaces <audio> tags with [AUDIO: url] markers.
+        - Removes extra whitespace and empty lines.
+        - Preserves URLs for media extraction via extract_medias().
+        - Returns text with one non-empty line per line.
     """
     # Insérer des marqueurs pour les médias avant d'extraire le texte
     for tag, label in [('img', 'IMAGE'), ('video', 'VIDEO'), ('audio', 'AUDIO')]:
@@ -2101,10 +2703,22 @@ def get_readable(content):
 
 
 def clean_html(soup):
-    """
-    Get rid of DOM objects with no valuable content
-    :param soup:
-    :return:
+    """Remove non-valuable DOM elements from HTML for content extraction.
+
+    This function removes elements that typically don't contain useful content
+    like scripts, navigation, footers, etc.
+
+    Args:
+        soup: A BeautifulSoup object containing HTML to clean.
+
+    Returns:
+        BeautifulSoup: The same soup object with unwanted elements removed.
+
+    Notes:
+        - Removes script, style, iframe, and form tags.
+        - Removes footer, nav, menu, social, and modal elements.
+        - Modifies the soup object in place.
+        - Useful for extracting main content before text analysis.
     """
     remove_selectors = ('script', 'style', 'iframe', 'form', 'footer', '.footer',
                         'nav', '.nav', '.menu', '.social', '.modal')
@@ -2114,10 +2728,21 @@ def clean_html(soup):
 
 
 def get_land_dictionary(land: model.Land):
-    """
-    Get land dictionary
-    :param land:
-    :return:
+    """Retrieve the word dictionary associated with a land.
+
+    This function fetches all Word objects that are part of a land's dictionary,
+    used for relevance scoring and text analysis.
+
+    Args:
+        land: The Land object whose dictionary to retrieve.
+
+    Returns:
+        A Peewee query object containing Word records associated with the land.
+
+    Notes:
+        - Returns a query that can be further filtered or iterated.
+        - Words are linked to lands via the LandDictionary join table.
+        - Dictionary words are stemmed forms used for matching content.
     """
     return model.Word.select() \
         .join(model.LandDictionary, JOIN.LEFT_OUTER) \
@@ -2125,10 +2750,20 @@ def get_land_dictionary(land: model.Land):
 
 
 def land_relevance(land: model.Land):
-    """
-    Start relevance computing according to land dictionary for each expression in land
-    :param land:
-    :return:
+    """Calculate and update relevance scores for all expressions in a land.
+
+    This function recalculates relevance scores for all non-null content expressions
+    in a land based on the current land dictionary.
+
+    Args:
+        land: The Land object whose expressions should be scored.
+
+    Notes:
+        - Only processes expressions with non-null content.
+        - Uses expression_relevance() to calculate individual scores.
+        - Updates expression.relevance field in the database.
+        - Relevance is based on dictionary word frequency in title and content.
+        - Higher scores indicate better match with land's topic/theme.
     """
     words = get_land_dictionary(land)
     select = model.Expression.select() \
@@ -2142,11 +2777,24 @@ def land_relevance(land: model.Land):
 
 
 def expression_relevance(dictionary, expression: model.Expression) -> int:
-    """
-    Compute expression relevance according to land dictionary
-    :param dictionary:
-    :param expression:
-    :return:
+    """Calculate expression relevance score based on land dictionary word matches.
+
+    This function computes a weighted relevance score by counting dictionary word
+    occurrences in the expression's title and readable content.
+
+    Args:
+        dictionary: A Peewee query result containing Word objects from the land dictionary.
+        expression: The Expression object to score.
+
+    Returns:
+        int: The relevance score (title matches × 10 + content matches × 1).
+
+    Notes:
+        - Title matches are weighted 10x more than content matches.
+        - Uses French word tokenization and stemming for matching.
+        - Matches whole words only (word boundaries).
+        - Returns 0 if title or readable content is missing.
+        - Falls back to simple tokenizer if NLTK is unavailable.
     """
     lemmas = [w.lemma for w in dictionary]
     title_relevance = [0]
@@ -2173,12 +2821,22 @@ def expression_relevance(dictionary, expression: model.Expression) -> int:
 
 
 def export_land(land: model.Land, export_type: str, minimum_relevance: int):
-    """
-    Export land data, file extension is set according to export type
-    :param land:
-    :param export_type:
-    :param minimum_relevance:
-    :return:
+    """Export land data to a file in the specified format.
+
+    This function creates an export file containing land data filtered by
+    minimum relevance threshold.
+
+    Args:
+        land: The Land object to export.
+        export_type: The export format (e.g., 'pagecsv', 'pagegexf', 'corpus').
+        minimum_relevance: Minimum relevance score filter for expressions.
+
+    Notes:
+        - Output filename includes land name, export type, and timestamp.
+        - Files are saved to settings.data_location directory.
+        - Supports formats: pagecsv, fullpagecsv, pagegexf, nodecsv, nodegexf, mediacsv, corpus.
+        - Prints success message with record count or error message.
+        - See Export class for format-specific details.
     """
     date_tag = model.datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     filename = path.join(settings.data_location, 'export_land_%s_%s_%s') \
@@ -2192,6 +2850,23 @@ def export_land(land: model.Land, export_type: str, minimum_relevance: int):
 
 
 def export_tags(land: model.Land, export_type: str, minimum_relevance: int):
+    """Export tag data to a CSV file.
+
+    This function exports tag-related data from a land, such as tag co-occurrence
+    matrix or tagged content.
+
+    Args:
+        land: The Land object to export tags from.
+        export_type: The export format (e.g., 'matrix', 'content').
+        minimum_relevance: Minimum relevance score filter for expressions.
+
+    Notes:
+        - Output filename includes land name, export type, and timestamp.
+        - Always exports to CSV format.
+        - Files are saved to settings.data_location directory.
+        - Prints success or error message.
+        - See Export class for tag export details.
+    """
     date_tag = model.datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     filename = path.join(settings.data_location, 'export_tags_%s_%s_%s.csv') \
                % (land.name, export_type, date_tag)
@@ -2204,9 +2879,18 @@ def export_tags(land: model.Land, export_type: str, minimum_relevance: int):
 
 
 def update_heuristic():
-    """
-    Update domains according to heuristic settings
-    :return:
+    """Update expression domains based on current heuristic settings.
+
+    This function recalculates domain names for all expressions using the current
+    heuristics configuration and updates the database accordingly.
+
+    Notes:
+        - Iterates through all expressions in the database.
+        - Applies current heuristics from settings.heuristics.
+        - Creates new Domain records if needed.
+        - Updates expression.domain foreign key relationships.
+        - Prints count of updated expressions.
+        - Useful after modifying heuristics configuration.
     """
     domains = list(model.Domain.select().dicts())
     domains = {x['id']: x for x in domains}
@@ -2223,12 +2907,45 @@ def update_heuristic():
 
 
 def delete_media(land: model.Land, max_width: int = 0, max_height: int = 0, max_size: int = 0):
+    """Delete all media associated with expressions in a land.
+
+    This function removes all Media records linked to expressions in the specified
+    land from the database.
+
+    Args:
+        land: The Land object whose media should be deleted.
+        max_width: Unused parameter (kept for compatibility).
+        max_height: Unused parameter (kept for compatibility).
+        max_size: Unused parameter (kept for compatibility).
+
+    Notes:
+        - Deletes all media for all expressions in the land.
+        - Currently ignores size/dimension filters.
+        - Performs database DELETE operation (irreversible).
+        - Does not delete actual media files, only database records.
+    """
     expressions = model.Expression.select().where(model.Land == land)
     model.Media.delete().where(model.Media.expression << expressions)
 
 async def medianalyse_land(land: model.Land) -> dict:
-    """
-    Analyse les médias pour un land donné.
+    """Analyze all media items associated with expressions in a land.
+
+    This async function processes all media in a land, extracting metadata and
+    performing analysis using the MediaAnalyzer.
+
+    Args:
+        land: The Land object whose media should be analyzed.
+
+    Returns:
+        dict: A dictionary containing analysis results with processed count.
+
+    Notes:
+        - Processes media from all expressions in the land asynchronously.
+        - Uses MediaAnalyzer for comprehensive media analysis.
+        - Extracts dimensions, colors, format, EXIF data, perceptual hashes.
+        - Updates Media database records with analysis results.
+        - Respects media filtering settings (min dimensions, max file size).
+        - Returns statistics about the analysis process.
     """
     from .media_analyzer import MediaAnalyzer
     
