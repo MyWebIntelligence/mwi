@@ -301,6 +301,12 @@ def configure_llm_docker(config: dict):
     config['MYWI_WITH_ML'] = '1'
     print(info("ML dependencies will be installed during Docker build"))
 
+    # Offer to skip interactive LLM configuration
+    if not ask_bool("Configure embeddings and LLM now?", default=False):
+        print(info("Skipping LLM configuration — defaults will rely on environment variables."))
+        _ensure_llm_defaults(config)
+        return
+
     # Embedding provider
     print()
     provider_choices = [
@@ -325,36 +331,48 @@ def configure_llm_docker(config: dict):
 
     if provider == "mistral":
         print_help("Get your API key at: https://console.mistral.ai/")
-        api_key = ask_secret("Mistral API Key", required=True)
-        config['MWI_MISTRAL_API_KEY'] = api_key
+        api_key = ask_secret("Mistral API Key", required=False)
+        config['MWI_MISTRAL_API_KEY'] = api_key or ''
         config['MWI_EMBED_MODEL'] = 'mistral-embed'
-        print(success(f"Mistral configured (key: {truncate_secret(api_key)})"))
+        if api_key:
+            print(success(f"Mistral configured (key: {truncate_secret(api_key)})"))
+        else:
+            print(info("Mistral key left empty (set MWI_MISTRAL_API_KEY later)."))
 
     elif provider == "openai":
         print_help("Get your API key at: https://platform.openai.com/api-keys")
-        api_key = ask_secret("OpenAI API Key", required=True)
+        api_key = ask_secret("OpenAI API Key", required=False)
         model = ask_string("Model", default="text-embedding-3-small")
-        config['MWI_OPENAI_API_KEY'] = api_key
+        config['MWI_OPENAI_API_KEY'] = api_key or ''
         config['MWI_EMBED_MODEL'] = model
-        print(success(f"OpenAI configured (model: {model})"))
+        if api_key:
+            print(success(f"OpenAI configured (model: {model})"))
+        else:
+            print(info("OpenAI key left empty (set MWI_OPENAI_API_KEY later)."))
 
     elif provider == "gemini":
         print_help("Get your API key at: https://makersuite.google.com/app/apikey")
-        api_key = ask_secret("Gemini API Key", required=True)
-        config['MWI_GEMINI_API_KEY'] = api_key
+        api_key = ask_secret("Gemini API Key", required=False)
+        config['MWI_GEMINI_API_KEY'] = api_key or ''
         config['MWI_EMBED_MODEL'] = 'embedding-001'
-        print(success(f"Gemini configured (key: {truncate_secret(api_key)})"))
+        if api_key:
+            print(success(f"Gemini configured (key: {truncate_secret(api_key)})"))
+        else:
+            print(info("Gemini key left empty (set MWI_GEMINI_API_KEY plus tard)."))
 
     elif provider == "huggingface":
         print_help("Get your API key at: https://huggingface.co/settings/tokens")
-        api_key = ask_secret("HuggingFace API Key", required=True)
+        api_key = ask_secret("HuggingFace API Key", required=False)
         model = ask_string(
             "Model",
             default="sentence-transformers/all-MiniLM-L6-v2"
         )
-        config['MWI_HF_API_KEY'] = api_key
+        config['MWI_HF_API_KEY'] = api_key or ''
         config['MWI_EMBED_MODEL'] = model
-        print(success(f"HuggingFace configured (model: {model})"))
+        if api_key:
+            print(success(f"HuggingFace configured (model: {model})"))
+        else:
+            print(info("HuggingFace key left empty (set MWI_HF_API_KEY plus tard)."))
 
     elif provider == "ollama":
         base_url = ask_string(
@@ -418,6 +436,8 @@ def configure_llm_docker(config: dict):
     config['MWI_NLI_CONTRADICTION_THRESHOLD'] = '0.8'
 
     print(success(f"LLM configuration complete (backend: {backend})"))
+
+    _ensure_llm_defaults(config)
 
 
 def display_env_summary(config: dict):
@@ -576,6 +596,26 @@ def update_settings_data_location(container_path: str = '/app/data'):
         return
 
     print(info('Updated settings.py:data_location to rely on MYWI_DATA_DIR (Docker-safe).'))
+
+
+def _ensure_llm_defaults(config: dict):
+    """Populate missing LLM-related keys with safe defaults."""
+    config.setdefault('MWI_EMBED_PROVIDER', 'mistral')
+    config.setdefault('MWI_EMBED_MODEL', 'mistral-embed')
+    config.setdefault('MWI_MISTRAL_API_KEY', '')
+    config.setdefault('MWI_OPENAI_API_KEY', '')
+    config.setdefault('MWI_GEMINI_API_KEY', '')
+    config.setdefault('MWI_HF_API_KEY', '')
+    config.setdefault('MWI_OLLAMA_BASE_URL', 'http://localhost:11434')
+    config.setdefault('MWI_EMBED_API_URL', '')
+    config.setdefault('MWI_NLI_MODEL_NAME', 'MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7')
+    config.setdefault('MWI_NLI_BACKEND', 'fallback')
+    config.setdefault('MWI_NLI_TORCH_THREADS', '1')
+    config.setdefault('MWI_NLI_FALLBACK_MODEL_NAME', 'typeform/distilbert-base-uncased-mnli')
+    config.setdefault('MWI_SIMILARITY_BACKEND', 'faiss')
+    config.setdefault('MWI_SIMILARITY_TOP_K', '50')
+    config.setdefault('MWI_NLI_ENTAILMENT_THRESHOLD', '0.8')
+    config.setdefault('MWI_NLI_CONTRADICTION_THRESHOLD', '0.8')
 
 
 def print_next_steps(level: str):
