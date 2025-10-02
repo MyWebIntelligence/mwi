@@ -80,8 +80,9 @@ MyWebIntelligence (MyWI) est un outil Python destiné aux équipes de recherche 
 **Commande unique**
 
 ```bash
-./scripts/docker-compose-setup.sh llm
+./scripts/docker-compose-setup.sh [basic|api|llm]
 ```
+Si vous omettez l’argument, le script utilise `basic`. Choisissez `api` pour configurer SerpAPI / SEO Rank / OpenRouter, ou `llm` pour inclure en plus les dépendances embeddings & NLI.
 
 **Approche pas-à-pas**
 
@@ -606,4 +607,3 @@ mywi.py  →  mwi/cli.py  →  mwi/controller.py  →  mwi/core.py & mwi/export.
 # Licence
 
 Projet distribué sous licence MIT — voir [LICENSE](LICENSE).
-

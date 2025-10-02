@@ -48,8 +48,9 @@ MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers i
 
 **One-command automated setup:**
 ```bash
-./scripts/docker-compose-setup.sh llm
+./scripts/docker-compose-setup.sh [basic|api|llm]
 ```
+`basic` est utilisé par défaut si vous omettez l’argument. Choisissez `api` pour inclure la configuration SerpAPI/SEO Rank/OpenRouter, ou `llm` pour en plus préparer les dépendances embeddings/NLI.
 
 **Or step-by-step:**
 ```bash
