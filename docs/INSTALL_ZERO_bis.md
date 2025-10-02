@@ -108,16 +108,17 @@ python mywi.py db setup
 # Verify installation
 python mywi.py land list
 ```
-
+message final with all pprocess check
 ---
 
 ### Level 2: API Installation (`install api`)
 
 **Builds on Basic installation with external API integrations.**
 
-#### Step 1: Complete Basic Installation
+#### Step 1: check if Complete Basic Installation
 
-Follow [Level 1: Basic Installation](#level-1-basic-installation-install) first.
+if test 'python mywi.py land list' dont work then stop install.
+and show [Level 1: Basic Installation](#level-1-basic-installation-install) first.
 
 #### Step 2: Run API Configuration Script
 
@@ -324,24 +325,23 @@ python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassific
 
 ### Level 1: Basic Docker (`install docker`)
 
-#### Step 1: Clone Repository
 
-```bash
+All the step is after 
+
 git clone https://github.com/MyWebIntelligence/mwi.git
 cd mwi
-```
+and inside mwi
 
-#### Step 2: Prepare Configuration Files
+#### Step 1: Prepare Configuration Files
 
 ```bash
 # Copy settings template
 cp settings-example.py settings.py
 
-# Create data directory
-mkdir -p ~/mywi_data
+# chose data directory
+#Ask data directory or default 
 ```
-
-#### Step 3: Build Docker Image
+#### Step 2: Build Docker Image
 
 ```bash
 docker build -t mwi:latest .
@@ -352,7 +352,7 @@ docker build -t mwi:latest .
 ```bash
 docker run -dit \
   --name mwi \
-  -v ~/mywi_data:/app/data \
+  -v [/pat/to/data]:/app/data \
   mwi:latest
 ```
 
@@ -382,8 +382,9 @@ docker rm mwi            # Remove container (data persists in ~/mywi_data)
 
 **Builds on Basic Docker with API credentials.**
 
-#### Step 1: Complete Basic Docker Installation
+#### Step 1: Check Complete Basic Docker Installation
 
+Check or stop
 Follow [Level 1: Basic Docker](#level-1-basic-docker-install-docker) first.
 
 #### Step 2: Configure API Keys in settings.py
