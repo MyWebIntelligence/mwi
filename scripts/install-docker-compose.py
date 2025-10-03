@@ -199,6 +199,8 @@ def configure_basic_docker(config: dict):
 
     # Playwright browsers
     print()
+    print_help("Dynamic media extraction uses Playwright headless browsers.")
+    print_help("Browsers require extra system libraries inside the container.")
     install_playwright = ask_bool(
         "Pre-install Playwright browsers in Docker image?",
         default=False
@@ -206,9 +208,15 @@ def configure_basic_docker(config: dict):
 
     if install_playwright:
         config['MYWI_WITH_PLAYWRIGHT_BROWSERS'] = '1'
-        print(info("Playwright browsers will be installed during build"))
+        print(info("Playwright browsers will be installed during build."))
+        print(info("After startup install libs: docker compose exec mwi bash -lc"))
+        print(info("  \"apt-get update && apt-get install -y libnspr4 libnss3 libdbus-1-3"))
+        print(info("     libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libxcomposite1"))
+        print(info("     libxdamage1 libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libasound2\""))
+        print(info("Then run: docker compose exec mwi python install_playwright.py"))
     else:
-        print(info("Playwright browsers not installed (can install later)"))
+        print(info("Playwright browsers not installed (can install later)."))
+        print(info("Enable dynamic extraction only after installing browsers + libs."))
 
 
 def configure_api_docker(config: dict):

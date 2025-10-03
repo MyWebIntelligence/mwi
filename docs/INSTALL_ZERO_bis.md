@@ -93,11 +93,30 @@ python scripts/install-basic.py
 
 The script generates `settings.py` with your configuration.
 
-#### Step 5: Always Install Playwright
+#### Step 5: Install Playwright (if using dynamic media)
+
+If you enabled *Dynamic Media Extraction* during `install-basic.py`, complete these steps:
 
 ```bash
+# 1. Install Playwright browsers
 python install_playwright.py
+
+# 2. (Linux) install required system libraries
+sudo apt-get install libnspr4 libnss3 libdbus-1-3 libatk1.0-0 \
+    libatk-bridge2.0-0 libatspi2.0-0 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libasound2
 ```
+
+**Docker users:**
+
+```bash
+docker compose exec mwi bash -lc "apt-get update && apt-get install -y libnspr4 libnss3 libdbus-1-3 \
+    libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libasound2"
+docker compose exec mwi python install_playwright.py
+```
+
+Skip this step if you left dynamic media extraction disabled.
 
 #### Step 6: Initialize Database
 
@@ -635,7 +654,16 @@ Edit `.env` and enable ML dependencies:
 ```bash
 # Build-time toggles
 MYWI_WITH_ML=1                    # Enable ML extras (FAISS + transformers)
-MYWI_WITH_PLAYWRIGHT_BROWSERS=0   # Optional: pre-install Playwright browsers
+MYWI_WITH_PLAYWRIGHT_BROWSERS=0   # Optional: pre-install Playwright browsers (install libs manually)
+```
+
+If you set `MYWI_WITH_PLAYWRIGHT_BROWSERS=1`, install the runtime libraries inside the container before running crawls:
+
+```bash
+docker compose exec mwi bash -lc "apt-get update && apt-get install -y libnspr4 libnss3 libdbus-1-3 \
+    libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libasound2"
+docker compose exec mwi python install_playwright.py
 ```
 
 #### Step 2: Configure Embedding Provider

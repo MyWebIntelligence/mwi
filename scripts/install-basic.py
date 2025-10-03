@@ -185,7 +185,16 @@ def configure_basic() -> dict:
 
     if config['dynamic_media_extraction']:
         print(success("Dynamic media extraction enabled"))
-        print(info("Remember to install Playwright: python install_playwright.py"))
+        print(info("Requires Playwright browsers and system libraries."))
+        print(info("Install steps (host):"))
+        print(info("  pip install -r requirements.txt"))
+        print(info("  python install_playwright.py"))
+        print(info("  sudo apt-get install libnspr4 libnss3 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0"))
+        print(info("                       libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3"))
+        print(info("                       libxrandr2 libgbm1 libxkbcommon0 libasound2"))
+        print(info("Docker container:"))
+        print(info("  docker compose exec mwi bash -lc \"apt-get update && apt-get install -y <libs>\""))
+        print(info("  docker compose exec mwi python install_playwright.py"))
     else:
         print(info("Dynamic media extraction disabled"))
 

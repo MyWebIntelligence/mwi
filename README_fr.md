@@ -163,7 +163,10 @@ python mywi.py land list
 
 - APIs : `python scripts/install-api.py`
 - Embeddings/LLM : `python -m pip install -r requirements-ml.txt && python scripts/install-llm.py`
-- Navigateurs Playwright : `python install_playwright.py`
+- Médias dynamiques (Playwright) :
+  - Navigateurs : `python install_playwright.py`
+  - Dépendances Debian/Ubuntu : `sudo apt-get install libnspr4 libnss3 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libasound2`
+  - Docker : `docker compose exec mwi bash -lc "apt-get update && apt-get install -y <libs>"` puis `docker compose exec mwi python install_playwright.py`
 
 **Problèmes NLTK (Windows/macOS)**
 
