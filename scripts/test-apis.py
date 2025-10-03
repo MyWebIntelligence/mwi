@@ -236,20 +236,18 @@ def test_seorank(settings, verbose: bool = False) -> bool:
 
     try:
         import requests
+        from urllib.parse import quote
 
         timeout = getattr(settings, 'seorank_timeout', 15)
 
         # Test with a known public URL
         test_url = "https://www.wikipedia.org/"
-
-        params = {
-            'key': api_key,
-            'url': test_url,
-        }
+        safe_url = quote(test_url, safe=':/?&=%')
+        request_url = f"{base_url.rstrip('/')}/{api_key}/{safe_url}"
 
         print(info(f"Sending test request for {test_url}..."))
 
-        response = requests.get(base_url, params=params, timeout=timeout)
+        response = requests.get(request_url, timeout=timeout)
 
         if response.status_code == 200:
             try:
