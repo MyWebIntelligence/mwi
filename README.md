@@ -61,6 +61,11 @@ cd mwi
 # 2. Configure (interactive wizard)
 python scripts/install-docker-compose.py
 
+# 2b. Create settings.py (required)
+cp settings-example.py settings.py
+# Windows (PowerShell): Copy-Item settings-example.py settings.py
+# Or run the wizard: python scripts/install-basic.py
+
 # 3. Build and start
 docker compose up -d --build
 
@@ -70,6 +75,9 @@ docker compose exec mwi python mywi.py db setup
 # 5. Verify
 docker compose exec mwi python mywi.py land list
 ```
+
+> ⚠️ `settings.py` is **not** created automatically inside the container.  
+> Copy `settings-example.py` (or run `python scripts/install-basic.py`) before executing MyWI commands; the file stores environment-specific paths and keys and is intentionally excluded from version control and Docker layers.
 
 **Where is my data?**
 
@@ -102,6 +110,8 @@ docker exec -it mwi python mywi.py db setup
 # Use
 docker exec -it mwi python mywi.py land list
 ```
+
+> ⚠️ Before running commands in the container, make sure `settings.py` exists (copy `settings-example.py` or run `python scripts/install-basic.py`). The project never auto-generates this file.
 
 **Management:** `docker stop mwi` · `docker start mwi` · `docker rm mwi`
 
