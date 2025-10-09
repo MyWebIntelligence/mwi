@@ -40,7 +40,8 @@ MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers i
 
 # Installation
 
-**Three installation options:** Docker Compose (recommended), Docker manual, or Local Python.
+**Three installation options:** Docker Compose (recommended), Docker manual, or Local Python.  
+Run every command from the repository root unless stated otherwise. On Windows, use a Bash-capable terminal (Git Bash or WSL) for shell scripts; for Python commands use `python` or `py -3`.
 
 > 📘 **Detailed guide:** See [docs/INSTALL_ZERO_bis.md](docs/INSTALL_ZERO_bis.md) for complete installation instructions with interactive setup scripts.
 
@@ -50,34 +51,46 @@ MyWebIntelligence (MyWI) is a Python-based tool designed to assist researchers i
 ```bash
 ./scripts/docker-compose-setup.sh [basic|api|llm]
 ```
-`basic` est utilisé par défaut si vous omettez l’argument. Choisissez `api` pour inclure la configuration SerpAPI/SEO Rank/OpenRouter, ou `llm` pour en plus préparer les dépendances embeddings/NLI.
+`basic` is used by default when you omit the argument. Choose `api` to configure SerpAPI/SEO Rank/OpenRouter, or `llm` to also prepare the embeddings/NLI dependencies.
 
-**Or step-by-step:**
-```bash
-# 1. Clone and prepare
-git clone https://github.com/MyWebIntelligence/mwi.git
-cd mwi
+On Windows, run the script from a Bash-capable shell:
+- Git Bash: `./scripts/docker-compose-setup.sh`
+- PowerShell: `& "C:\Program Files\Git\bin\bash.exe" ./scripts/docker-compose-setup.sh`
+- WSL: `wsl bash ./scripts/docker-compose-setup.sh`
+Double-clicking the `.sh` file will not execute it.
 
-# 2. Configure (interactive wizard)
-python scripts/install-docker-compose.py
+**Or step-by-step (host terminal):**
 
-# 2b. Create settings.py (required)
-cp settings-example.py settings.py
-# Windows (PowerShell): Copy-Item settings-example.py settings.py
-# Or run the wizard: python scripts/install-basic.py
-
-# 3. Build and start
-docker compose up -d --build
-
-# 4. Initialize database
-docker compose exec mwi python mywi.py db setup
-
-# 5. Verify
-docker compose exec mwi python mywi.py land list
-```
+1. Clone the project:
+   ```bash
+   git clone https://github.com/MyWebIntelligence/mwi.git
+   cd mwi
+   ```
+2. Generate `.env` for Docker Compose (interactive wizard):
+   ```bash
+   python scripts/install-docker-compose.py
+   ```
+   On Windows you can also use `py -3 scripts/install-docker-compose.py`.
+3. Build and start the container:
+   ```bash
+   docker compose up -d --build
+   ```
+4. Create `settings.py` **inside** the container (run once per environment):
+   ```bash
+   docker compose exec mwi bash -lc "cp settings-example.py settings.py"
+   ```
+   To customize settings interactively instead, run:
+   ```bash
+   docker compose exec -it mwi python scripts/install-basic.py --output settings.py
+   ```
+5. Initialize and verify the database:
+   ```bash
+   docker compose exec mwi python mywi.py db setup
+   docker compose exec mwi python mywi.py land list
+   ```
 
 > ⚠️ `settings.py` is **not** created automatically inside the container.  
-> Copy `settings-example.py` (or run `python scripts/install-basic.py`) before executing MyWI commands; the file stores environment-specific paths and keys and is intentionally excluded from version control and Docker layers.
+> Create it from within the container (copy `settings-example.py` or run `python scripts/install-basic.py`) before executing MyWI commands; the file stores environment-specific paths and keys and is intentionally excluded from version control and Docker layers.
 
 **Where is my data?**
 
@@ -104,6 +117,11 @@ docker build -t mwi:latest .
 # Run
 docker run -dit --name mwi -v ~/mywi_data:/app/data mwi:latest
 
+# Create settings.py in the container (first run)
+docker exec mwi bash -lc "cp settings-example.py settings.py"
+# Or customize:
+# docker exec -it mwi python scripts/install-basic.py --output settings.py
+
 # Initialize
 docker exec -it mwi python mywi.py db setup
 
@@ -127,6 +145,7 @@ docker exec -it mwi python mywi.py land list
 git clone https://github.com/MyWebIntelligence/mwi.git
 cd mwi
 python3 -m venv .venv
+# Windows (PowerShell): py -3 -m venv .venv
 source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
 
 # 2. Configure (interactive wizard)
@@ -188,15 +207,15 @@ python -m nltk.downloader punkt punkt_tab
 *   If using Docker, first execute `docker exec -it mwi bash` to enter the container. The prompt might be `root@<container_id>:/app#` or similar.
 
 ```bash
-# S’assurer que le service tourne
+# Ensure the service is running
 docker compose up -d
-# Entrer dans le conteneur
+# Enter the container
 docker compose exec mwi bash
-#ou
+# or
 docker exec -it mwi bash
-#  >>> (prompt ≈ root@<container_id>:/app#)
+#  >>> Prompt typically looks like root@<container_id>:/app#
 
-# Exécuter ensuite n’importe quelle commande applicative
+# Then run any application command
 ```
 
 *   If using a local development setup, ensure your virtual environment is activated (e.g., `(venv)` prefix in your prompt).
@@ -212,7 +231,7 @@ source .venv/bin/activate
 # Windows Command Prompt (cmd.exe)
 .\.venv\Scripts\activate.bat
 
-# Exécuter ensuite n’importe quelle commande applicative
+# Then run any application command
 python mywi.py land list
 ```
 

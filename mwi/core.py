@@ -8,6 +8,8 @@ import json
 import random
 import re
 import time
+import shutil
+import zipfile
 from argparse import Namespace
 from datetime import date, datetime, timedelta
 from os import path
@@ -32,6 +34,30 @@ except ImportError:
 import settings
 from . import model
 from .export import Export
+
+def _cleanup_nltk_resource(resource: str) -> bool:
+    """Remove corrupted NLTK resource artifacts so they can be re-downloaded."""
+    removed = False
+    # Look for both directory and zip variants in every configured nltk data path
+    candidates = []
+    for base in list(nltk.data.path):
+        tokenizers_dir = path.join(base, 'tokenizers')
+        candidates.extend([
+            path.join(tokenizers_dir, resource),
+            path.join(tokenizers_dir, f"{resource}.zip"),
+            path.join(tokenizers_dir, f"{resource}.pickle"),
+        ])
+    for candidate in candidates:
+        if path.exists(candidate):
+            try:
+                if path.isdir(candidate):
+                    shutil.rmtree(candidate)
+                else:
+                    os.remove(candidate)
+                removed = True
+            except Exception:
+                pass
+    return removed
 
 def _ensure_nltk_tokenizers() -> bool:
     """Ensure required NLTK tokenizers are available with resilient SSL and local cache.
@@ -72,9 +98,14 @@ def _ensure_nltk_tokenizers() -> bool:
     for resource in ('punkt', 'punkt_tab'):
         try:
             nltk.data.find(f'tokenizers/{resource}')
-        except LookupError:
+            continue
+        except Exception as exc:
+            # If the resource exists but is corrupted, purge artifacts before re-downloading
+            if isinstance(exc, zipfile.BadZipFile):
+                _cleanup_nltk_resource(resource)
             try:
                 nltk.download(resource, quiet=True)
+                nltk.data.find(f'tokenizers/{resource}')
             except Exception:
                 ok = False
     return ok
