@@ -295,7 +295,18 @@ class LandController:
 
         land = model.Land.get_or_none(model.Land.name == args.name)
         if land is None:
-            print(f'Land "{args.name}" not found')
+            print(f'[seorank] Error: Land "{args.name}" not found')
+            # Show available lands to help the user
+            available_lands = model.Land.select()
+            if available_lands.count() > 0:
+                print('[seorank] Available lands:')
+                for available_land in available_lands:
+                    expr_count = model.Expression.select().where(
+                        model.Expression.land == available_land
+                    ).count()
+                    print(f'  - {available_land.name} ({expr_count} expressions)')
+            else:
+                print('[seorank] No lands found in database. Create one with: python mywi.py land create')
             return 0
 
         limit = core.get_arg_option('limit', args, set_type=int, default=0)

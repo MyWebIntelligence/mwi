@@ -979,10 +979,11 @@ def _serpapi_duckduckgo_region(lang: str) -> str:
 
 
 def fetch_seorank_for_url(url: str, api_key: str) -> Optional[dict]:
-    """Call the SEO Rank API for a single URL and return the JSON payload.
+    """Call the SEO Rank API for a single URL with retry logic and return the JSON payload.
 
     This function makes an HTTP request to the SEO Rank API to fetch metrics
-    (Moz, SimilarWeb, Facebook) for a given URL.
+    (Moz, SimilarWeb, Facebook) for a given URL. Implements exponential backoff
+    retry logic for transient failures.
 
     Args:
         url: The URL to fetch SEO metrics for.
@@ -990,38 +991,68 @@ def fetch_seorank_for_url(url: str, api_key: str) -> Optional[dict]:
 
     Returns:
         Optional[dict]: A dictionary containing the JSON response from the API,
-            or None if the request fails.
+            or None if all retry attempts fail.
 
     Notes:
         - Uses URL-safe encoding for the URL parameter.
         - Default base URL is 'https://seo-rank.my-addr.com/api2/moz+sr+fb'.
         - Configurable via settings.seorank_api_base_url.
-        - Timeout is configurable via settings.seorank_timeout (default 15s).
-        - Prints error messages for HTTP failures or JSON parsing errors.
+        - Timeout is configurable via settings.seorank_timeout (default 30s).
+        - Implements retry with exponential backoff (configurable via settings).
+        - Max retries: settings.seorank_max_retries (default 3).
+        - Backoff multiplier: settings.seorank_retry_backoff (default 2.0).
+        - Prints detailed error messages including retry attempts.
     """
     base_url = getattr(settings, 'seorank_api_base_url', '').strip()
     if not base_url:
         base_url = 'https://seo-rank.my-addr.com/api2/moz+sr+fb'
 
+    timeout = getattr(settings, 'seorank_timeout', 30)
+    max_retries = getattr(settings, 'seorank_max_retries', 3)
+    backoff_multiplier = getattr(settings, 'seorank_retry_backoff', 2.0)
+
     # API expects the raw URL path; keep common URL separators unescaped
     safe_url = quote(url, safe=':/?&=%')
     request_url = f"{base_url.rstrip('/')}/{api_key}/{safe_url}"
-    try:
-        response = requests.get(request_url, timeout=getattr(settings, 'seorank_timeout', 15))
-    except requests.RequestException as exc:
-        print(f"[seorank] HTTP error for {url}: {exc}")
-        return None
 
-    if response.status_code != 200:
-        print(f"[seorank] Unexpected status {response.status_code} for {url}")
-        return None
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.get(request_url, timeout=timeout)
 
-    try:
-        return response.json()
-    except ValueError as exc:
-        snippet = response.text[:120].replace('\n', ' ')
-        print(f"[seorank] JSON decoding failed for {url}: {exc} (body preview: {snippet})")
-        return None
+            if response.status_code != 200:
+                if attempt < max_retries:
+                    print(f"[seorank] Status {response.status_code} for {url} (attempt {attempt}/{max_retries})")
+                else:
+                    print(f"[seorank] Failed with status {response.status_code} for {url} after {max_retries} attempts")
+                    return None
+            else:
+                # Success - parse JSON
+                try:
+                    return response.json()
+                except ValueError as exc:
+                    snippet = response.text[:120].replace('\n', ' ')
+                    print(f"[seorank] JSON decoding failed for {url}: {exc} (body preview: {snippet})")
+                    return None
+
+        except requests.Timeout as exc:
+            if attempt < max_retries:
+                wait_time = backoff_multiplier ** (attempt - 1)
+                print(f"[seorank] Timeout for {url} (attempt {attempt}/{max_retries}), retrying in {wait_time:.1f}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"[seorank] Timeout for {url} after {max_retries} attempts: {exc}")
+                return None
+
+        except requests.RequestException as exc:
+            if attempt < max_retries:
+                wait_time = backoff_multiplier ** (attempt - 1)
+                print(f"[seorank] HTTP error for {url} (attempt {attempt}/{max_retries}): {exc}, retrying in {wait_time:.1f}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"[seorank] HTTP error for {url} after {max_retries} attempts: {exc}")
+                return None
+
+    return None
 
 
 def update_seorank_for_land(
@@ -1036,7 +1067,8 @@ def update_seorank_for_land(
     """Fetch SEO Rank data for land expressions and store the raw JSON payload.
 
     This function processes expressions in a land, fetches SEO metrics from the
-    SEO Rank API, and stores the results in the database.
+    SEO Rank API, and stores the results in the database. Provides detailed
+    progress tracking and statistics.
 
     Args:
         land: The Land object containing expressions to process.
@@ -1057,6 +1089,8 @@ def update_seorank_for_land(
         - Adds configurable delay between requests (settings.seorank_request_delay).
         - Filters by HTTP status (defaults to '200' if not specified).
         - Skips expressions with None relevance if min_relevance > 0.
+        - Prints progress updates every 100 URLs with time estimates.
+        - Displays detailed statistics upon completion.
     """
     expressions = model.Expression.select().where(model.Expression.land == land)
 
@@ -1068,7 +1102,7 @@ def update_seorank_for_land(
         http_status_normalized = http_status.strip().lower()
         if http_status_normalized not in ('all', 'any', 'none', ''):
             expressions = expressions.where(model.Expression.http_status == http_status.strip())
-    
+
     if min_relevance is not None and min_relevance > 0:
         expressions = expressions.where(model.Expression.relevance >= min_relevance)
 
@@ -1079,9 +1113,22 @@ def update_seorank_for_land(
     if limit and limit > 0:
         expressions = expressions.limit(limit)
 
+    # Get total count for progress tracking
+    total_count = expressions.count()
+    print(f"[seorank] Starting SEO Rank enrichment for land '{land.name}'")
+    print(f"[seorank] Total URLs to process: {total_count}")
+
+    if total_count == 0:
+        print("[seorank] No expressions to process.")
+        return 0, 0
+
     processed = 0
     updated = 0
+    failed = 0
     sleep_seconds = max(0.0, float(getattr(settings, 'seorank_request_delay', 0)))
+
+    start_time = time.time()
+    last_progress_update = 0
 
     for expression in expressions:
         processed += 1
@@ -1090,8 +1137,44 @@ def update_seorank_for_land(
             expression.seorank = json.dumps(payload)
             expression.save(only=[model.Expression.seorank])
             updated += 1
+        else:
+            failed += 1
+
+        # Progress update every 100 URLs
+        if processed % 100 == 0 or processed == total_count:
+            elapsed = time.time() - start_time
+            avg_time_per_url = elapsed / processed
+            remaining_urls = total_count - processed
+            eta_seconds = remaining_urls * avg_time_per_url
+
+            # Format ETA
+            if eta_seconds < 60:
+                eta_str = f"{eta_seconds:.0f}s"
+            elif eta_seconds < 3600:
+                eta_str = f"{eta_seconds/60:.0f}m"
+            else:
+                eta_str = f"{eta_seconds/3600:.1f}h"
+
+            success_rate = (updated / processed * 100) if processed > 0 else 0
+            print(f"[seorank] Progress: {processed}/{total_count} ({processed/total_count*100:.1f}%) | "
+                  f"Success: {updated} | Failed: {failed} | Success rate: {success_rate:.1f}% | "
+                  f"ETA: {eta_str}")
+
         if sleep_seconds:
             time.sleep(sleep_seconds)
+
+    # Final statistics
+    total_time = time.time() - start_time
+    success_rate = (updated / processed * 100) if processed > 0 else 0
+
+    print(f"\n[seorank] ===== SEO Rank Enrichment Complete =====")
+    print(f"[seorank] Land: {land.name}")
+    print(f"[seorank] Total processed: {processed}")
+    print(f"[seorank] Successful: {updated} ({success_rate:.1f}%)")
+    print(f"[seorank] Failed: {failed} ({100-success_rate:.1f}%)")
+    print(f"[seorank] Total time: {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)")
+    print(f"[seorank] Average time per URL: {total_time/processed:.2f}s")
+    print(f"[seorank] ==========================================\n")
 
     return processed, updated
 
