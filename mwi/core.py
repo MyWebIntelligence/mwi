@@ -2563,21 +2563,35 @@ def unwrap_archive_url(url: str) -> str:
     Notes:
         - Handles web.archive.org format: https://web.archive.org/web/{timestamp}/{original_url}
         - Handles ghostarchive.org format: https://ghostarchive.org/archive/{id}/{original_url}
+        - Preserves query strings and fragments from the original URL
     """
     parsed = urlparse(url)
 
     # Handle web.archive.org URLs
     if parsed.netloc in ('web.archive.org', 'archive.org'):
-        # Pattern: https://web.archive.org/web/20221026155732/https://example.com/page
+        # Pattern: https://web.archive.org/web/20221026155732/https://example.com/page?query
         # Also handles image URLs with im_ suffix: /web/20241211122618im_/https://...
-        match = re.search(r'/web/\d+(?:[a-z]+_)?/(.+)$', parsed.path)
+        # Work on the full URL path + query + fragment to preserve everything
+        full_path = parsed.path
+        if parsed.query:
+            full_path += '?' + parsed.query
+        if parsed.fragment:
+            full_path += '#' + parsed.fragment
+
+        match = re.search(r'/web/\d+(?:[a-z]+_)?/(.+)$', full_path)
         if match:
             return match.group(1)
 
     # Handle ghostarchive.org URLs
     elif parsed.netloc == 'ghostarchive.org':
         # Pattern: https://ghostarchive.org/archive/12345/https://example.com/page
-        match = re.search(r'/archive/[^/]+/(.+)$', parsed.path)
+        full_path = parsed.path
+        if parsed.query:
+            full_path += '?' + parsed.query
+        if parsed.fragment:
+            full_path += '#' + parsed.fragment
+
+        match = re.search(r'/archive/[^/]+/(.+)$', full_path)
         if match:
             return match.group(1)
 
