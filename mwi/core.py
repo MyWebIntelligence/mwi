@@ -994,6 +994,7 @@ def fetch_seorank_for_url(url: str, api_key: str) -> Optional[dict]:
             or None if all retry attempts fail.
 
     Notes:
+        - Automatically unwraps archive.org URLs to get the original URL for ranking.
         - Uses URL-safe encoding for the URL parameter.
         - Default base URL is 'https://seo-rank.my-addr.com/api2/moz+sr+fb'.
         - Configurable via settings.seorank_api_base_url.
@@ -1011,8 +1012,11 @@ def fetch_seorank_for_url(url: str, api_key: str) -> Optional[dict]:
     max_retries = getattr(settings, 'seorank_max_retries', 3)
     backoff_multiplier = getattr(settings, 'seorank_retry_backoff', 2.0)
 
+    # Unwrap archive.org URLs to get the original URL that Google indexes
+    original_url = unwrap_archive_url(url)
+
     # API expects the raw URL path; keep common URL separators unescaped
-    safe_url = quote(url, safe=':/?&=%')
+    safe_url = quote(original_url, safe=':/?&=%')
     request_url = f"{base_url.rstrip('/')}/{api_key}/{safe_url}"
 
     for attempt in range(1, max_retries + 1):
@@ -1201,6 +1205,72 @@ def stem_word(word: str) -> str:
         setattr(stem_word, "stemmer", FrenchStemmer())
     # The following line uses getattr which is safe
     return str(getattr(stem_word, "stemmer").stem(word.lower()))
+
+
+def is_language_compatible(expression_lang: str, land_langs: str) -> bool:
+    """Check if an expression's language is compatible with the land's accepted languages.
+
+    This function parses comma-separated language lists and performs flexible language
+    code matching. It handles language variants (e.g., 'fr' matches 'fr-FR') and
+    returns True if at least one language from the expression is compatible with the
+    land's accepted languages.
+
+    Args:
+        expression_lang: The language code from the expression (e.g., 'fr', 'en-US').
+            May be empty or None.
+        land_langs: Comma-separated list of accepted language codes for the land
+            (e.g., 'fr,en,de'). May be empty or None.
+
+    Returns:
+        bool: True if the expression language is compatible with at least one land
+            language, or if expression_lang is empty/None (to avoid blocking pages
+            without lang attribute). False if there's a language mismatch.
+
+    Examples:
+        >>> is_language_compatible('fr', 'fr,en')
+        True
+        >>> is_language_compatible('fr-FR', 'fr')
+        True
+        >>> is_language_compatible('de', 'fr,en')
+        False
+        >>> is_language_compatible('', 'fr')
+        True  # Empty lang doesn't block
+        >>> is_language_compatible('en-US', 'en,fr')
+        True
+
+    Notes:
+        - Language codes are compared case-insensitively.
+        - Supports both exact matches ('fr' == 'fr') and variant matches ('fr-FR' matches 'fr').
+        - If expression_lang is empty or None, returns True to avoid blocking pages
+          that don't have a lang attribute in their HTML.
+        - Whitespace in language codes is automatically stripped.
+    """
+    # If expression has no language info, don't block it
+    # (some pages may not have lang attribute in HTML)
+    if not expression_lang or not expression_lang.strip():
+        return True
+
+    # If land has no language restriction, accept all
+    if not land_langs or not land_langs.strip():
+        return True
+
+    # Parse language lists (comma-separated)
+    expr_langs = [lang.strip().lower() for lang in expression_lang.split(',') if lang.strip()]
+    land_lang_list = [lang.strip().lower() for lang in land_langs.split(',') if lang.strip()]
+
+    # Check if any expression language is compatible with any land language
+    for expr_lang in expr_langs:
+        for land_lang in land_lang_list:
+            # Exact match
+            if expr_lang == land_lang:
+                return True
+            # Variant match: 'fr-FR' matches 'fr', 'en-US' matches 'en'
+            expr_base = expr_lang.split('-')[0]
+            land_base = land_lang.split('-')[0]
+            if expr_base == land_base:
+                return True
+
+    return False
 
 
 def crawl_domains(limit: int = 0, http: Optional[str] = None):
@@ -1946,20 +2016,25 @@ async def crawl_expression_with_media_analysis(expression: model.Expression, dic
         expression.description = str(get_description(soup)) if get_description(soup) else None # type: ignore
         expression.keywords = str(get_keywords(soup)) if get_keywords(soup) else None # type: ignore
         expression.lang = str(soup.html.get('lang', '')) if soup.html else '' # type: ignore
-        # Compute relevance with OpenRouter gate when enabled
-        try:
-            from .llm_openrouter import is_relevant_via_openrouter  # local import to avoid overhead when disabled
-            if getattr(settings, 'openrouter_enabled', False) and settings.openrouter_api_key and settings.openrouter_model:
-                verdict = is_relevant_via_openrouter(expression.land, expression)  # type: ignore
-                if verdict is False:
-                    expression.relevance = 0  # type: ignore
+        # Check language compatibility BEFORE any relevance calculation
+        if expression.lang and not is_language_compatible(expression.lang, expression.land.lang):  # type: ignore
+            expression.relevance = 0  # type: ignore
+            print(f"Language mismatch for expression #{expression.id}: lang='{expression.lang}' not in land langs='{expression.land.lang}'")  # type: ignore
+        else:
+            # Compute relevance with OpenRouter gate when enabled
+            try:
+                from .llm_openrouter import is_relevant_via_openrouter  # local import to avoid overhead when disabled
+                if getattr(settings, 'openrouter_enabled', False) and settings.openrouter_api_key and settings.openrouter_model:
+                    verdict = is_relevant_via_openrouter(expression.land, expression)  # type: ignore
+                    if verdict is False:
+                        expression.relevance = 0  # type: ignore
+                    else:
+                        expression.relevance = expression_relevance(dictionary, expression)  # type: ignore
                 else:
                     expression.relevance = expression_relevance(dictionary, expression)  # type: ignore
-            else:
+            except Exception as e:
+                print(f"OpenRouter gate error for {expression.url}: {e}")
                 expression.relevance = expression_relevance(dictionary, expression)  # type: ignore
-        except Exception as e:
-            print(f"OpenRouter gate error for {expression.url}: {e}")
-            expression.relevance = expression_relevance(dictionary, expression)  # type: ignore
         expression.readable_at = model.datetime.datetime.now() # type: ignore
         if expression.relevance is not None and expression.relevance > 0: # type: ignore
             expression.approved_at = model.datetime.datetime.now() # type: ignore
@@ -2274,20 +2349,25 @@ async def crawl_expression(expression: model.Expression, dictionary, session: ai
         expression.description = str(get_description(soup)) if get_description(soup) else None # type: ignore
         expression.keywords = str(get_keywords(soup)) if get_keywords(soup) else None # type: ignore
         expression.lang = str(soup.html.get('lang', '')) if soup.html else '' # type: ignore
-        # Compute relevance with OpenRouter gate when enabled
-        try:
-            from .llm_openrouter import is_relevant_via_openrouter
-            if getattr(settings, 'openrouter_enabled', False) and settings.openrouter_api_key and settings.openrouter_model:
-                verdict = is_relevant_via_openrouter(expression.land, expression)  # type: ignore
-                if verdict is False:
-                    expression.relevance = 0  # type: ignore
+        # Check language compatibility BEFORE any relevance calculation
+        if expression.lang and not is_language_compatible(expression.lang, expression.land.lang):  # type: ignore
+            expression.relevance = 0  # type: ignore
+            print(f"Language mismatch for expression #{expression.id}: lang='{expression.lang}' not in land langs='{expression.land.lang}'")  # type: ignore
+        else:
+            # Compute relevance with OpenRouter gate when enabled
+            try:
+                from .llm_openrouter import is_relevant_via_openrouter
+                if getattr(settings, 'openrouter_enabled', False) and settings.openrouter_api_key and settings.openrouter_model:
+                    verdict = is_relevant_via_openrouter(expression.land, expression)  # type: ignore
+                    if verdict is False:
+                        expression.relevance = 0  # type: ignore
+                    else:
+                        expression.relevance = expression_relevance(dictionary, expression)  # type: ignore
                 else:
                     expression.relevance = expression_relevance(dictionary, expression)  # type: ignore
-            else:
+            except Exception as e:
+                print(f"OpenRouter gate error for {expression.url}: {e}")
                 expression.relevance = expression_relevance(dictionary, expression)  # type: ignore
-        except Exception as e:
-            print(f"OpenRouter gate error for {expression.url}: {e}")
-            expression.relevance = expression_relevance(dictionary, expression)  # type: ignore
         expression.readable_at = model.datetime.datetime.now() # type: ignore
         if expression.relevance is not None and expression.relevance > 0: # type: ignore
             expression.approved_at = model.datetime.datetime.now() # type: ignore
@@ -2471,6 +2551,39 @@ def add_expression(land: model.Land, url: str, depth=0) -> Union[model.Expressio
     return False
 
 
+def unwrap_archive_url(url: str) -> str:
+    """Extract the original URL from an archive.org or ghostarchive.org URL.
+
+    Args:
+        url: The URL to check and potentially unwrap.
+
+    Returns:
+        str: The original URL if it's an archive URL, otherwise the input URL unchanged.
+
+    Notes:
+        - Handles web.archive.org format: https://web.archive.org/web/{timestamp}/{original_url}
+        - Handles ghostarchive.org format: https://ghostarchive.org/archive/{id}/{original_url}
+    """
+    parsed = urlparse(url)
+
+    # Handle web.archive.org URLs
+    if parsed.netloc in ('web.archive.org', 'archive.org'):
+        # Pattern: https://web.archive.org/web/20221026155732/https://example.com/page
+        # Also handles image URLs with im_ suffix: /web/20241211122618im_/https://...
+        match = re.search(r'/web/\d+(?:[a-z]+_)?/(.+)$', parsed.path)
+        if match:
+            return match.group(1)
+
+    # Handle ghostarchive.org URLs
+    elif parsed.netloc == 'ghostarchive.org':
+        # Pattern: https://ghostarchive.org/archive/12345/https://example.com/page
+        match = re.search(r'/archive/[^/]+/(.+)$', parsed.path)
+        if match:
+            return match.group(1)
+
+    return url
+
+
 def get_domain_name(url: str) -> str:
     """Extract the domain name from a URL with heuristic-based refinement.
 
@@ -2485,15 +2598,19 @@ def get_domain_name(url: str) -> str:
 
     Notes:
         - Default extraction uses urllib's urlparse to get netloc.
+        - Unwraps archive.org and ghostarchive.org URLs to get the original domain.
         - Applies heuristics from settings.heuristics for special domains.
         - Heuristics can extract sub-paths (e.g., 'twitter.com/username').
         - Useful for grouping URLs by logical domain/account.
     """
-    parsed = urlparse(url)
+    # First unwrap any archive URLs to get the original URL
+    unwrapped_url = unwrap_archive_url(url)
+
+    parsed = urlparse(unwrapped_url)
     domain_name = parsed.netloc
     for key, value in settings.heuristics.items():
         if domain_name.endswith(key):
-            matches = re.findall(value, url)
+            matches = re.findall(value, unwrapped_url)
             domain_name = matches[0] if matches else domain_name
     return domain_name
 
@@ -2660,9 +2777,10 @@ def process_expression_content(expression: model.Expression, html: str, dictiona
     else:
         expression.readable = readable_content # type: ignore
 
-    # Check if page language matches land language
-    if expression.lang and expression.land.lang and expression.lang != expression.land.lang:
+    # Check language compatibility BEFORE any relevance calculation
+    if expression.lang and not is_language_compatible(expression.lang, expression.land.lang):  # type: ignore
         expression.relevance = 0 # type: ignore
+        print(f"Language mismatch for expression #{expression.id}: lang='{expression.lang}' not in land langs='{expression.land.lang}'")  # type: ignore
     else:
         # Compute relevance with OpenRouter gate when enabled
         try:

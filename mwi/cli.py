@@ -190,6 +190,9 @@ def command_input():
     parser.add_argument('--force',
                         action='store_true',
                         help='Force include expressions with previous LLM verdict = non (for land llm validate)')
+    parser.add_argument('--dryrun',
+                        action='store_true',
+                        help='Dry run mode - show what would be changed without modifying database')
     args = parser.parse_args()
     # Always convert lang to a list
     if hasattr(args, "lang") and isinstance(args.lang, str):
@@ -224,7 +227,8 @@ def dispatch(args):
     controllers = {
         'db': {
             'setup': DbController.setup,
-            'migrate': DbController.migrate
+            'migrate': DbController.migrate,
+            'fix_archive_domains': DbController.fix_archive_domains
         },
         'domain': {
             'crawl': DomainController.crawl

@@ -214,7 +214,123 @@ class DbController:
             loop.run_until_complete(process())
         except KeyboardInterrupt:
             print('Analyse interrompue par l\'utilisateur')
-        
+
+        return 1
+
+    @staticmethod
+    def fix_archive_domains(args: core.Namespace):
+        """Fix expressions that have archive.org domains instead of their original domains.
+
+        This migration identifies expressions with URLs from web.archive.org, ghostarchive.org,
+        or archive.org, extracts the original domain from the archived URL, and updates the
+        domain_id to point to the correct domain.
+
+        Args:
+            args: Namespace object containing command-line arguments. Optional arguments:
+                - dryrun: If True, only displays what would be changed without modifying database
+                - limit: Maximum number of expressions to process (for testing)
+
+        Returns:
+            int: 1 if migration completed successfully.
+
+        Notes:
+            - Handles URLs in format: https://web.archive.org/web/{timestamp}/{original_url}
+            - Creates new Domain entries if the original domain doesn't exist
+            - Resets seorank to NULL so it can be re-fetched with the correct unwrapped URL
+            - Reports progress every 100 expressions
+            - Can be run multiple times safely (idempotent)
+        """
+        dryrun = core.get_arg_option('dryrun', args, set_type=bool, default=False)
+        limit = core.get_arg_option('limit', args, set_type=int, default=0)
+
+        # Find all expressions with archive domains
+        archive_domains = model.Domain.select().where(
+            (model.Domain.name == 'web.archive.org') |
+            (model.Domain.name == 'archive.org') |
+            (model.Domain.name == 'ghostarchive.org')
+        )
+
+        archive_domain_ids = [d.id for d in archive_domains]
+
+        if not archive_domain_ids:
+            print("No archive.org domains found in database")
+            return 1
+
+        # Only select the columns we need to avoid UTF-8 decoding errors in 'readable' column
+        query = model.Expression.select(
+            model.Expression.id,
+            model.Expression.url,
+            model.Expression.domain_id
+        ).where(
+            model.Expression.domain_id.in_(archive_domain_ids)
+        )
+
+        if limit > 0:
+            query = query.limit(limit)
+
+        # Get total count first (without loading the rows)
+        total = query.count()
+
+        if total == 0:
+            print("No expressions with archive.org domains found")
+            return 1
+
+        print(f"Found {total} expressions with archive.org domains")
+        if dryrun:
+            print("DRY RUN MODE - no changes will be made")
+
+        updated = 0
+        errors = 0
+        domain_cache = {}
+
+        # Iterate without loading all into memory to avoid encoding issues
+        for i, expr in enumerate(query.iterator(), 1):
+            try:
+                # Extract the real domain name from the URL
+                real_domain_name = core.get_domain_name(expr.url)
+
+                # Skip if it's still an archive domain (shouldn't happen with the fix)
+                if real_domain_name in ('web.archive.org', 'archive.org', 'ghostarchive.org'):
+                    print(f"Warning: Could not extract original domain from {expr.url}")
+                    errors += 1
+                    continue
+
+                # Get or create the real domain
+                if real_domain_name in domain_cache:
+                    real_domain = domain_cache[real_domain_name]
+                else:
+                    real_domain, created = model.Domain.get_or_create(name=real_domain_name)
+                    domain_cache[real_domain_name] = real_domain
+                    if created and not dryrun:
+                        print(f"  Created new domain: {real_domain_name}")
+
+                # Update the expression using a direct SQL update to avoid loading all columns
+                # Also reset seorank to NULL so it can be re-fetched with the unwrapped URL
+                if not dryrun:
+                    model.Expression.update(
+                        domain_id=real_domain.id,
+                        seorank=None
+                    ).where(
+                        model.Expression.id == expr.id
+                    ).execute()
+
+                updated += 1
+
+                if i % 100 == 0:
+                    print(f"Progress: {i}/{total} expressions processed ({updated} updated, {errors} errors)")
+
+            except Exception as e:
+                print(f"Error processing expression {expr.id} ({expr.url}): {e}")
+                errors += 1
+
+        print(f"\nMigration completed:")
+        print(f"  Total expressions: {total}")
+        print(f"  Updated: {updated}")
+        print(f"  Errors: {errors}")
+
+        if dryrun:
+            print("\nThis was a DRY RUN. Run without --dryrun to apply changes.")
+
         return 1
 
 
