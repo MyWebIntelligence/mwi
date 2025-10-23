@@ -7,10 +7,13 @@ import calendar
 import json
 import random
 import re
+import signal
+import sys
 import time
 import shutil
 import zipfile
 from argparse import Namespace
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import date, datetime, timedelta
 from os import path
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -1273,6 +1276,75 @@ def is_language_compatible(expression_lang: str, land_langs: str) -> bool:
     return False
 
 
+class TimeoutException(Exception):
+    """Custom exception for timeout handling."""
+    pass
+
+
+def _timeout_handler(signum, frame):
+    """Signal handler for SIGALRM timeout."""
+    raise TimeoutException("Operation timed out")
+
+
+def _fetch_url_with_retry_and_timeout(url: str, timeout: int = 10, max_retries: int = 3, backoff_delays: List[int] = None) -> Optional[str]:
+    """Fetch URL with timeout and retry logic using exponential backoff.
+
+    Uses signal.alarm() on Unix/macOS for proper timeout enforcement, and
+    ThreadPoolExecutor as fallback on Windows.
+
+    Args:
+        url: The URL to fetch
+        timeout: Timeout in seconds for each fetch attempt
+        max_retries: Maximum number of retry attempts (default: 3)
+        backoff_delays: List of delays between retries in seconds (default: [1, 2, 5])
+
+    Returns:
+        Optional[str]: The downloaded HTML content, or None if all attempts failed
+    """
+    if backoff_delays is None:
+        backoff_delays = [1, 2, 5]
+
+    # Check if signal.alarm is available (Unix/macOS)
+    use_signal = hasattr(signal, 'alarm') and sys.platform != 'win32'
+
+    for attempt in range(max_retries):
+        try:
+            if use_signal:
+                # Unix/macOS: Use signal.alarm for reliable timeout
+                old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+                signal.alarm(timeout)
+                try:
+                    result = trafilatura.fetch_url(url)
+                    signal.alarm(0)  # Cancel the alarm
+                    if result:
+                        return result
+                finally:
+                    signal.alarm(0)  # Ensure alarm is cancelled
+                    signal.signal(signal.SIGALRM, old_handler)  # Restore previous handler
+            else:
+                # Windows: Use ThreadPoolExecutor as fallback
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(trafilatura.fetch_url, url)
+                    result = future.result(timeout=timeout)
+                    if result:
+                        return result
+
+        except TimeoutException:
+            print(f"  Attempt {attempt + 1}/{max_retries} timed out after {timeout}s for {url}", flush=True)
+        except FuturesTimeoutError:
+            print(f"  Attempt {attempt + 1}/{max_retries} timed out after {timeout}s for {url}", flush=True)
+        except Exception as e:
+            print(f"  Attempt {attempt + 1}/{max_retries} failed for {url}: {e}", flush=True)
+
+        # Apply backoff delay before next retry (but not after the last attempt)
+        if attempt < max_retries - 1:
+            delay = backoff_delays[min(attempt, len(backoff_delays) - 1)]
+            print(f"  Waiting {delay}s before retry...", flush=True)
+            time.sleep(delay)
+
+    return None
+
+
 def crawl_domains(limit: int = 0, http: Optional[str] = None):
     """Crawl domains to retrieve metadata using a multi-strategy pipeline.
 
@@ -1321,10 +1393,10 @@ def crawl_domains(limit: int = 0, http: Optional[str] = None):
         # Attempt 1: Trafilatura (tries HTTPS then HTTP internally if not specified)
         print(f"Attempting Trafilatura for {domain.name} ({domain_url_https})")
         try:
-            # Trafilatura's fetch_url tries to find a working scheme
-            downloaded = trafilatura.fetch_url(domain_url_https)
+            # Use retry and timeout wrapper to prevent infinite blocking
+            downloaded = _fetch_url_with_retry_and_timeout(domain_url_https, timeout=settings.default_timeout)
             if not downloaded: # Try HTTP if HTTPS failed
-                 downloaded = trafilatura.fetch_url(domain_url_http)
+                 downloaded = _fetch_url_with_retry_and_timeout(domain_url_http, timeout=settings.default_timeout)
 
             if downloaded:
                 html_content = downloaded
@@ -1970,7 +2042,10 @@ async def crawl_expression_with_media_analysis(expression: model.Expression, dic
                 archive_data = archive_response.json()
                 archived_url = archive_data.get('archived_snapshots', {}).get('closest', {}).get('url')
                 if archived_url:
-                    downloaded = await asyncio.to_thread(trafilatura.fetch_url, archived_url)
+                    downloaded = await asyncio.wait_for(
+                        asyncio.to_thread(trafilatura.fetch_url, archived_url),
+                        timeout=settings.default_timeout
+                    )
                     if downloaded:
                         raw_html = downloaded
                         extracted_content = trafilatura.extract(downloaded, include_links=True, include_images=True, output_format='markdown')
@@ -2303,7 +2378,10 @@ async def crawl_expression(expression: model.Expression, dictionary, session: ai
                 archive_data = archive_response.json()
                 archived_url = archive_data.get('archived_snapshots', {}).get('closest', {}).get('url')
                 if archived_url:
-                    downloaded = await asyncio.to_thread(trafilatura.fetch_url, archived_url)
+                    downloaded = await asyncio.wait_for(
+                        asyncio.to_thread(trafilatura.fetch_url, archived_url),
+                        timeout=settings.default_timeout
+                    )
                     if downloaded:
                         raw_html = downloaded
                         extracted_content = trafilatura.extract(downloaded, include_links=True, include_images=True, output_format='markdown')
