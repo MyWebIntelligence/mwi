@@ -107,21 +107,32 @@ def fullhtml_land(fresh_db):
     """Build a closed-network test land (sprint R2: union + '#' filtering).
 
     Raw html outbound <a href> per expression. E1 footer links to E3 twice
-    (UPPER host + trailing slash -> raw-only edge weighthtml=2) and carries a
-    same-page #sec1 anchor that must be filtered (no E1->E1 self-loop).
+    (UPPER host + trailing slash -> raw-only edge weighthtml=2), to E5 once
+    (raw-only edge weighthtml=1) and carries a same-page #sec1 anchor that
+    must be filtered (no E1->E1 self-loop).
     ExpressionLink (body): E1->E2, E2->E1, E3->E1, E3->E2 -> weightbody=1.
 
     Expressions (relevance, html outbound <a href>):
-      E1 site-a/home   rel5  -> E2 x2 (content), E3 (footer), E4 (rel0), external
+      E1 site-a/home   rel5  -> E2 x2 (content), E3 + E5 (footer), E4 (rel0), external
       E2 site-a/article rel5 -> E1
       E3 site-b/page    rel5 -> E1
       E4 site-b/lowrel  rel0 -> E1            (excluded: relevance < minrel)
-      E5 site-a/nohtml  rel5  html=None        (no contribution)
+      E5 site-a/nohtml  rel5  html=None        (no raw contribution)
 
     MyWI ExpressionLink graph (the markdown-readable extraction):
       E1->E2, E2->E1, E3->E1  (also present in raw HTML -> in_mywi=1)
       E3->E2                  (NOT in raw HTML -> contributes to mywi\\raw)
-    Note E1->E3 (footer) is NOT in ExpressionLink -> in_mywi=0 in the raw graph.
+    Note E1->E3 / E1->E5 (footer) are NOT in ExpressionLink -> in_mywi=0.
+
+    Readable markdown (citation column ground truth):
+      E1 cites E2 (exact URL) and E3 (UPPER host + trailing slash variant)
+      E2 readable=None (never extracted)
+      E3 cites E2 only (E3->E1 is in ExpressionLink but NOT in the readable,
+         simulating the crawl BS4 fallback that fills ExpressionLink from
+         raw HTML anchors)
+      E5 cites E2 (readable-only link: must NOT create any edge)
+    -> citation=1: E1->E2, E1->E3, E3->E2
+    -> citation=0: E2->E1 (readable NULL), E3->E1, E1->E5
     """
     model = fresh_db["model"]
     controller = fresh_db["controller"]
@@ -136,10 +147,11 @@ def fullhtml_land(fresh_db):
     d_a = model.Domain.create(name="site-a.test")
     d_b = model.Domain.create(name="site-b.test")
 
-    def mk(url, domain, rel, html):
+    def mk(url, domain, rel, html, readable=None):
         return model.Expression.create(land=land, domain=domain, url=url,
-                                        relevance=rel, depth=0,
-                                        http_status="200", html=html)
+                                       relevance=rel, depth=0,
+                                       http_status="200", html=html,
+                                       readable=readable)
 
     e1_html = (
         '<html><body><article>'
@@ -152,9 +164,12 @@ def fullhtml_land(fresh_db):
         '</article>'
         # two footer anchors to E3 via UPPER host + trailing slash -> raw-only
         # edge (absent from ExpressionLink), weighthtml=2, robust matching.
+        # One footer anchor to E5 -> raw-only edge weighthtml=1, absent from
+        # E1's readable -> citation=0.
         '<footer>'
         '<a href="https://SITE-B.test/page/">site b</a>'
         '<a href="https://SITE-B.test/page/">site b again</a>'
+        '<a href="https://site-a.test/nohtml">n5</a>'
         '</footer>'
         '</body></html>'
     )
@@ -162,11 +177,15 @@ def fullhtml_land(fresh_db):
     e3_html = '<html><body><p><a href="https://site-a.test/home">home</a></p></body></html>'
     e4_html = '<html><body><p><a href="https://site-a.test/home">home</a></p></body></html>'
 
-    e1 = mk("https://site-a.test/home", d_a, 5, e1_html)
+    e1 = mk("https://site-a.test/home", d_a, 5, e1_html,
+            readable="Voir [art](https://site-a.test/article) et "
+                     "[site b](https://SITE-B.test/page/).")
     e2 = mk("https://site-a.test/article", d_a, 5, e2_html)
-    e3 = mk("https://site-b.test/page", d_b, 5, e3_html)
+    e3 = mk("https://site-b.test/page", d_b, 5, e3_html,
+            readable="Lire [article](https://site-a.test/article).")
     e4 = mk("https://site-b.test/lowrel", d_b, 0, e4_html)
-    e5 = mk("https://site-a.test/nohtml", d_a, 5, None)
+    e5 = mk("https://site-a.test/nohtml", d_a, 5, None,
+            readable="[art](https://site-a.test/article)")
 
     for s, t in [(e1, e2), (e2, e1), (e3, e1), (e3, e2)]:
         model.ExpressionLink.create(source=s, target=t)
@@ -279,10 +298,87 @@ class TestClosedNetworkPageLinks:
         assert stats["pages_with_html"] == 3
         # body edges: E1->E2, E2->E1, E3->E1, E3->E2 (ExpressionLink, non-self)
         assert stats["body_edges"] == 4
-        # raw-only edge: footer E1->E3 (absent from ExpressionLink)
-        assert stats["rawonly_edges"] == 1
-        assert stats["total_edges"] == 5
-        assert len(edges) == 5
+        # raw-only edges: footer E1->E3 and E1->E5 (absent from ExpressionLink)
+        assert stats["rawonly_edges"] == 2
+        assert stats["total_edges"] == 6
+        assert len(edges) == 6
+
+
+class TestCitationColumn:
+    """citation = 1 iff the link appears in the source's readable markdown.
+
+    Independent from weightbody: an ExpressionLink row can come from the
+    crawl BS4 fallback (raw HTML anchors) while the readable lacks the link.
+    """
+
+    def _write(self, fullhtml_land, tmp_path, minrel=1):
+        exp = Export('nodelinkcsv', fullhtml_land["land"], minrel, fullhtml=True)
+        out = str(tmp_path / "pl.csv")
+        exp._write_pageslinksfullhtml(out)
+        return exp, _edge_map(out)
+
+    def test_header_citation_position(self, fullhtml_land, tmp_path):
+        """citation sits right after weighthtml; header[:5] is unchanged."""
+        exp = Export('nodelinkcsv', fullhtml_land["land"], 1, fullhtml=True)
+        out = str(tmp_path / "pl.csv")
+        exp._write_pageslinksfullhtml(out)
+        with open(out, encoding="utf-8") as f:
+            header = csv.DictReader(f).fieldnames
+        assert header[:5] == ['Source', 'Target', 'Weight',
+                              'weightbody', 'weighthtml']
+        assert header[5] == 'citation'
+
+    def test_body_edge_cited_in_readable(self, fullhtml_land, tmp_path):
+        """E1->E2: ExpressionLink edge whose URL is in E1's readable -> 1."""
+        e = fullhtml_land["e"]
+        _, edges = self._write(fullhtml_land, tmp_path)
+        row = edges[(e["e1"].id, e["e2"].id)]
+        assert row["weightbody"] == "1"
+        assert row["citation"] == "1"
+
+    def test_body_edge_absent_from_readable_is_zero(self, fullhtml_land, tmp_path):
+        """E3->E1 is in ExpressionLink but not in E3's readable (BS4
+        fallback simulation) -> citation=0 despite weightbody=1."""
+        e = fullhtml_land["e"]
+        _, edges = self._write(fullhtml_land, tmp_path)
+        row = edges[(e["e3"].id, e["e1"].id)]
+        assert row["weightbody"] == "1"
+        assert row["citation"] == "0"
+
+    def test_rawonly_edge_cited_via_url_variant(self, fullhtml_land, tmp_path):
+        """E1->E3 is raw-only, but E1's readable cites E3 via an UPPER host +
+        trailing slash variant -> the 3-key resolver still matches -> 1."""
+        e = fullhtml_land["e"]
+        _, edges = self._write(fullhtml_land, tmp_path)
+        row = edges[(e["e1"].id, e["e3"].id)]
+        assert row["weightbody"] == "0"
+        assert row["citation"] == "1"
+
+    def test_rawonly_edge_not_cited_is_zero(self, fullhtml_land, tmp_path):
+        """E1->E5 (footer anchor) is absent from E1's readable -> 0."""
+        e = fullhtml_land["e"]
+        _, edges = self._write(fullhtml_land, tmp_path)
+        row = edges[(e["e1"].id, e["e5"].id)]
+        assert row["weightbody"] == "0"
+        assert row["citation"] == "0"
+
+    def test_null_readable_gives_zero(self, fullhtml_land, tmp_path):
+        """E2 has readable=None -> every edge sourced at E2 has citation=0."""
+        e = fullhtml_land["e"]
+        _, edges = self._write(fullhtml_land, tmp_path)
+        assert edges[(e["e2"].id, e["e1"].id)]["citation"] == "0"
+
+    def test_readable_only_link_creates_no_edge(self, fullhtml_land, tmp_path):
+        """E5 cites E2 in its readable but E5->E2 is in neither ExpressionLink
+        nor the raw HTML -> no new edge is created by the citation pass."""
+        e = fullhtml_land["e"]
+        _, edges = self._write(fullhtml_land, tmp_path)
+        assert (e["e5"].id, e["e2"].id) not in edges
+
+    def test_stats_citation_edges(self, fullhtml_land, tmp_path):
+        """citation=1: E1->E2, E1->E3, E3->E2."""
+        exp, _ = self._write(fullhtml_land, tmp_path)
+        assert exp._fullhtml_stats["citation_edges"] == 3
 
 
 class TestClosedNetworkDomainLinks:
@@ -395,5 +491,6 @@ class TestLandWithoutStoredHtml:
         with open(out, encoding="utf-8") as f:
             rows = list(csv.reader(f))
         assert rows == [['Source', 'Target', 'Weight', 'weightbody',
-                         'weighthtml', 'source_url', 'source_domain_id',
+                         'weighthtml', 'citation',
+                         'source_url', 'source_domain_id',
                          'target_url', 'target_domain_id']]

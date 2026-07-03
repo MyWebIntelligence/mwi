@@ -26,7 +26,7 @@ from lxml import etree
 from urllib.parse import urlparse
 from zipfile import ZipFile
 from . import model
-from .link_context import extract_all_links
+from .link_context import extract_all_links, extract_markdown_links
 from .url_normalizer import normalize_url
 
 
@@ -735,9 +735,16 @@ class Export:
           ExpressionLink -> weightbody=0, weighthtml=<raw anchor multiplicity>
           (in_mwi=0). The two sets are disjoint.
 
+        Every emitted edge also carries citation (1/0): 1 iff the link appears
+        in the SOURCE expression's readable markdown. Independent from
+        weightbody — an ExpressionLink row can come from the crawl BS4
+        fallback (raw HTML anchors) while the readable lacks the link.
+        readable NULL/empty -> citation=0. The citation pass never creates
+        edges: a link present only in the readable emits no row.
+
         Self-loops are dropped (in-page '#' anchors / self-references, not real
         links). Columns use Gephi naming (Source/Target/Weight, Weight empty)
-        plus weightbody/weighthtml and the source/target url+domain.
+        plus weightbody/weighthtml/citation and the source/target url+domain.
 
         ALL lookups are preloaded before the streaming cursor opens: MWI uses
         one shared DB connection, so no second statement / lazy FK access may
@@ -781,6 +788,22 @@ class Export:
         for s, t in cur.fetchall():
             mywi_page_edges.add((s, t))
 
+        # 0) citation lookup: (sid, tid) edges whose link appears in the
+        #    source's readable markdown, resolved through the SAME 3-key
+        #    ladder as the raw-HTML pass. Drained fully before the next
+        #    statement (single shared DB connection); only int pairs are
+        #    kept, readable texts are transient row-by-row.
+        readable_edges = set()
+        cur = model.DB.execute_sql(
+            "SELECT id, url, readable FROM expression "
+            "WHERE land_id = ? AND relevance >= ? "
+            "AND readable IS NOT NULL AND readable != ''", (land_id, minrel))
+        for sid, surl, readable in cur:
+            for href in extract_markdown_links(readable, surl):
+                tid = self._fullhtml_lookup(idx, href)
+                if tid is not None and tid != sid:
+                    readable_edges.add((sid, tid))
+
         # --- emission: union of the editorial graph (ExpressionLink = body)
         #     and the raw-only edges found ONLY in the full HTML.
         # weightbody = 1 for an edge present in ExpressionLink (in_mwi=1);
@@ -793,10 +816,10 @@ class Export:
         # empty so Gephi defaults it to 1.0 — the analytic signal lives in
         # weightbody/weighthtml.
         header = ['Source', 'Target', 'Weight', 'weightbody', 'weighthtml',
-                  'source_url', 'source_domain_id',
+                  'citation', 'source_url', 'source_domain_id',
                   'target_url', 'target_domain_id']
         domain_acc = {}   # (sd, td) -> [in_mwi (Σweightbody), out_mwi (Σweighthtml)]
-        body_edges = rawonly_edges = count = 0
+        body_edges = rawonly_edges = citation_edges = count = 0
         pages_total = pages_with_html = 0
 
         with open(filename, 'w', newline='\n', encoding='utf-8') as file:
@@ -809,7 +832,9 @@ class Export:
                 if sid == tid:
                     continue
                 sdom, td = domain_of.get(sid), domain_of.get(tid)
-                writer.writerow([sid, tid, '', 1, 0,
+                citation = 1 if (sid, tid) in readable_edges else 0
+                citation_edges += citation
+                writer.writerow([sid, tid, '', 1, 0, citation,
                                  url_of.get(sid), sdom, url_of.get(tid), td])
                 count += 1
                 body_edges += 1
@@ -835,7 +860,9 @@ class Export:
                     if sid == tid or (sid, tid) in mywi_page_edges:
                         continue
                     td = domain_of.get(tid)
-                    writer.writerow([sid, tid, '', 0, weighthtml,
+                    citation = 1 if (sid, tid) in readable_edges else 0
+                    citation_edges += citation
+                    writer.writerow([sid, tid, '', 0, weighthtml, citation,
                                      surl, sdom, url_of.get(tid), td])
                     count += 1
                     rawonly_edges += 1
@@ -850,6 +877,7 @@ class Export:
             'pages_total': pages_total, 'pages_with_html': pages_with_html,
             'body_edges': body_edges, 'rawonly_edges': rawonly_edges,
             'total_edges': body_edges + rawonly_edges,
+            'citation_edges': citation_edges,
         }
         pct = (100.0 * pages_with_html / pages_total) if pages_total else 0.0
         print(f"  - pageslinksfullhtml.csv: {count} edges "
@@ -857,6 +885,8 @@ class Export:
         print(f"      MyWI/body (in_mwi=1): {body_edges} | "
               f"fullhtml-only (in_mwi=0): {rawonly_edges} | "
               f"total: {body_edges + rawonly_edges}")
+        print(f"      citation (link in readable): {citation_edges} | "
+              f"non-citation: {count - citation_edges}")
         if pages_with_html == 0:
             print("      WARNING: no stored HTML for this land — crawl with "
                   "--fullhtml=TRUE or run 'land consolidate' on a "
