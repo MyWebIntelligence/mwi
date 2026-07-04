@@ -124,6 +124,27 @@ class TestLandExportCSV:
 
         assert ret == 1
 
+    def test_pageslinks_excludes_self_loops(self, populated_land):
+        """Une ligne ExpressionLink source==target ne sort jamais dans pageslinks."""
+        controller = populated_land["controller"]
+        core = populated_land["core"]
+        model = populated_land["model"]
+        name = populated_land["name"]
+        data_dir = str(populated_land["data_dir"])
+        expr = populated_land["expressions"][5]
+        model.ExpressionLink.create(source=expr, target=expr)
+
+        ret = controller.LandController.export(
+            core.Namespace(name=name, type="nodelinkcsv", minrel=0)
+        )
+
+        assert ret == 1
+        csv_file = sorted(glob.glob(os.path.join(data_dir, "*_pageslinks.csv")))[-1]
+        with open(csv_file, "r", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        assert rows, "Normal links should still be exported"
+        assert all(r["source_id"] != r["target_id"] for r in rows)
+
     def test_export_minrel_filter(self, populated_land):
         """--minrel=X filtre les expressions."""
         controller = populated_land["controller"]
@@ -609,6 +630,7 @@ class TestLandExportPagesJSON:
             "name": name,
             "controller": controller,
             "core": core,
+            "model": model,
             "data_dir": fresh_db["data_dir"],
         }
 
@@ -617,6 +639,19 @@ class TestLandExportPagesJSON:
         expr0, expr1 = pagesjson_land["expressions"]
         graph = _export_graph(pagesjson_land, "pagesjson", 1)
 
+        edges = {(lk["source"], lk["target"]) for lk in graph["links"]}
+        assert (expr0.id, expr1.id) in edges
+
+    def test_pagesjson_links_exclude_self_loops(self, pagesjson_land):
+        """Un ExpressionLink page→elle-même n'apparaît jamais dans links."""
+        model = pagesjson_land["model"]
+        expr0, expr1 = pagesjson_land["expressions"]
+        model.ExpressionLink.create(source=expr0, target=expr0)
+
+        graph = _export_graph(pagesjson_land, "pagesjson", 1)
+
+        assert all(lk["source"] != lk["target"] for lk in graph["links"])
+        # l'arête intra-domaine normale reste conservée
         edges = {(lk["source"], lk["target"]) for lk in graph["links"]}
         assert (expr0.id, expr1.id) in edges
 

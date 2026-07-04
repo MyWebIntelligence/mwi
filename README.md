@@ -863,15 +863,15 @@ python mywi.py land export --name="MyResearchTopic" --type=EXPORT_TYPE [--minrel
 - `corpus`: Raw text corpus
 - `pseudolinks`: CSV of semantic paragraph pairs (source/target expression, domain, paragraph indices, relation score, confidence, snippets)
 - `pseudolinkspage`: CSV of page‑level aggregated pseudolinks (expression↔expression). Columns: Source_ExpressionID, Target_ExpressionID, Source_DomainID, Target_DomainID, PairCount, EntailCount, NeutralCount, ContradictCount, AvgRelationScore, AvgConfidence.
-- `pseudolinksdomain`: CSV of domain‑level aggregated pseudolinks (domain↔domain). Columns: Source_DomainID, Source_Domain, Target_DomainID, Target_Domain, PairCount, EntailCount, NeutralCount, ContradictCount, AvgRelationScore, AvgConfidence.
+- `pseudolinksdomain`: CSV of domain‑level aggregated pseudolinks (domain↔domain). Columns: Source_DomainID, Source_Domain, Target_DomainID, Target_Domain, PairCount, EntailCount, NeutralCount, ContradictCount, AvgRelationScore, AvgConfidence. Intra-domain pairs (self-loops in the domain graph) are excluded.
 - `nodelinkcsv`: Generates 4 CSV files for complete network analysis:
   - `*_pagesnodes.csv`: Expression nodes with all fields (id, url, domain_id, domain_name, title, description, keywords, lang, relevance, depth, http_status, created_at, published_at, fetched_at, approved_at, readable_at, validllm, validmodel) + dynamic SEO rank columns (sr_rank, sr_traffic, fb_shares, etc.)
-  - `*_pageslinks.csv`: All expression links (source_id, source_url, source_domain_id, target_id, target_url, target_domain_id)
+  - `*_pageslinks.csv`: All expression links (source_id, source_url, source_domain_id, target_id, target_url, target_domain_id). Self-loops (source = target) are never exported.
   - `*_domainnodes.csv`: Domain nodes with aggregations (id, name, title, description, http_status, nbexpressions, average_relevance, first_expression_date, last_expression_date)
   - `*_domainlinks.csv`: Aggregated inter-domain links (source_domain_id, source_domain_name, target_domain_id, target_domain_name, link_count)
   - With `--fullhtml=TRUE` (requires a land crawled with `--fullhtml`), emits the 4 `*fullhtml.csv` files **instead of** the base 4 — the flag *switches* which network is exported (not additive), so run a separate export without it to also get the MyWI network. These are the **raw link network** rebuilt from *every* `<a href>` in `expression.html` (closed network — targets restricted to corpus pages qualified by `--minrel`). `*_pageslinksfullhtml.csv` uses Gephi columns `Source,Target,Weight` (Weight left empty) plus `weightbody` (`1` if the edge exists in `ExpressionLink`), `weighthtml` (raw anchor multiplicity for edges found only in the stored HTML) and `citation` (`1` if the link appears in the source page's `readable` markdown — an editorial citation written in the text; `0` for nav/footer/raw-only links or when the readable is missing); `*_domainlinksfullhtml.csv` uses `in_mwi` + `out_mwi`. This lets you compare MyWI's *editorial* link network (`ExpressionLink`, from the readable content) to a classic crawler's *whole-page* network. The export prints a 3-way coverage report (raw∩mywi / raw\mywi / mywi\raw). Without stored HTML the files are emitted empty (header only) with a warning.
 - `nodesjson`: **Domain** graph as a force-graph `{nodes, links}` JSON file (for `react-force-graph`, D3, Sigma). One node per domain carrying at least one expression with `relevance >= minrel`, with 9 analytical fields (`id, name, title, description, keywords, nbexpressions, average_relevance, first_expression_date, last_expression_date`) **plus** `corpus` — a sorted array of that domain's expressions, each a nested object `{title, urlarticle, description, published_at}`. Links are directed inter-domain edges with `value` = page-to-page link count. Output is deterministic. Conforms to `docs/graph.schema.json`.
-- `pagesjson`: **Page** graph as a force-graph `{nodes, links}` JSON file. One node per `Expression` with the `pagecsv` fields (minus `depth`/`readable`), `tags` as a sorted array, and `seorank` as a nested object (`{}` when absent). Absent values are JSON `null` (not the CSV `na` sentinel). Links are page-to-page edges of the closed `minrel` network (intra-domain kept, no aggregation). Output is deterministic. Conforms to `docs/graph.schema.json`.
+- `pagesjson`: **Page** graph as a force-graph `{nodes, links}` JSON file. One node per `Expression` with the `pagecsv` fields (minus `depth`/`readable`), `tags` as a sorted array, and `seorank` as a nested object (`{}` when absent). Absent values are JSON `null` (not the CSV `na` sentinel). Links are page-to-page edges of the closed `minrel` network (intra-domain kept, no aggregation, self-loops excluded). Output is deterministic. Conforms to `docs/graph.schema.json`.
 - `htmldump` (sprint-html E): Zip archive of the raw HTML stored via
   `--fullhtml`. Contains one `{expression_id}.html` per expression where
   `html IS NOT NULL` plus a `manifest.csv` listing
@@ -1050,16 +1050,62 @@ python mywi.py land normalize --name=LAND_NAME
 python mywi.py land normalize --name=LAND_NAME --reset-status
 ```
 
-**What `land normalize` does** for each Expression in the Land:
+**What `land normalize` does** — Expressions are planned by canonical-URL
+group (every variant converging on the same target belongs to one group):
 
-- If the canonical form is **not** present as another Expression: UPDATE in
-  place, fill `original_url`.
-- If the canonical form **is** already an Expression: remap every
-  `ExpressionLink` (incoming and outgoing) to the canonical, drop self-loops
-  and pre-existing duplicates, then DELETE the redundant Expression
-  (CASCADE removes its Media, Paragraph, TaggedContent — those came from
-  the duplicate's snapshot anyway).
+- If the canonical form is **not** present on any row: the **richest
+  variant is promoted** (html > readable > relevance > fetched_at >
+  smallest id) — UPDATE in place, fill `original_url` — and the other
+  variants of the group are merged into it. This handles http/https, www
+  and trailing-slash variants when the corresponding rules are newly
+  enabled (no two rows ever end up sharing the same URL).
+- If the canonical form **is** already an Expression: every variant is
+  merged into it — remap every `ExpressionLink` (incoming and outgoing) to
+  the canonical, drop self-loops and pre-existing duplicates, **backfill
+  the canonical's empty content fields** (`html`, `readable`, `title`,
+  metadata, LLM verdict as a `(validllm, validmodel)` pair; `depth` takes
+  the minimum; `relevance` is left untouched — run `land consolidate`
+  afterwards to recompute it) from the duplicate without ever overwriting
+  a non-empty field, then DELETE the redundant Expression (CASCADE removes
+  its Media, Paragraph, TaggedContent — rebuilt by `land consolidate` from
+  the merged readable).
 - Wayback-of-Wayback chains are resolved transitively in one pass.
+- The report counts `renamed`, `promoted`, `merged`, `collision groups`
+  and `backfilled` fields. In `--dry-run`, link-remap and cascade volumes
+  stay at 0 (apply-only).
+
+**Deduplication runbook** (variant duplicates: http/https, www, trailing
+slash) — to collapse an existing corpus polluted by URL-variant rows:
+
+```bash
+# 1. Backup (checkpoint the WAL first)
+sqlite3 data/mwi.db "PRAGMA wal_checkpoint(TRUNCATE);"
+cp data/mwi.db data/mwi.db.bak_$(date +%Y%m%d_%H%M%S)
+
+# 2. Enable the strict rules (also harden them in settings.py so future
+#    crawls keep using them — otherwise variants reappear)
+export MWI_URL_FORCE_HTTPS=true
+export MWI_URL_STRIP_WWW=true
+# and edit settings.py: "trailing_slash": "strip"  (no env override)
+
+# 3. Audit, then apply (interruptible, re-runnable, converges)
+python mywi.py land normalize --name=LAND_NAME --dry-run --verbose
+python mywi.py land normalize --name=LAND_NAME
+
+# 4. Verify: a second dry-run reports 0 changes, and
+#    SELECT url, COUNT(*) FROM expression WHERE land_id=? GROUP BY url
+#    HAVING COUNT(*)>1;  returns no row
+
+# 5. Recompute relevance and rebuild links/media from the merged readables
+python mywi.py land consolidate --name=LAND_NAME
+```
+
+Known limits: `https://site.com` and `https://site.com/` do not converge
+(the root slash is preserved by the `strip` policy); two rows already
+sharing the same canonical URL are left untouched; with `--limit` a group
+may be processed partially (re-runs converge). On very large databases
+prefer running on a local copy (SQLite I/O on cloud-synced drives is
+slow), then move the file back.
 
 **Archive.org circuit breaker** — when archive.org is unreachable (a frequent
 occurrence since 2024), the readable pipeline's Wayback fallback opens a

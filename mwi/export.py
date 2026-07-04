@@ -393,7 +393,8 @@ class Export:
             node['seorank'] = seorank or {}    # nested object, {} when absent
             nodes.append(node)
 
-        # page-to-page links (closed minrel network) ; no aggregation, intra-domain kept.
+        # page-to-page links (closed minrel network) ; no aggregation,
+        # intra-domain kept, self-loops (source == target) excluded.
         link_cols = {'source': 'link.source_id', 'target': 'link.target_id'}
         link_sql = """
             WITH idx(x) AS (
@@ -403,6 +404,7 @@ class Export:
             SELECT {}
             FROM expressionlink AS link
             WHERE link.source_id IN idx AND link.target_id IN idx
+              AND link.source_id != link.target_id
             ORDER BY link.source_id, link.target_id
         """
         links = [
@@ -548,6 +550,9 @@ class Export:
     def _write_pageslinks(self, filename) -> int:
         """Write expression links to CSV file (all links including intra-domain).
 
+        Self-loops (source == target) are never exported: they come from pages
+        referencing their own URL (permalinks, share links), not real edges.
+
         Args:
             filename: Path to output CSV file.
 
@@ -575,6 +580,7 @@ class Export:
             JOIN expression AS e1 ON e1.id = link.source_id
             JOIN expression AS e2 ON e2.id = link.target_id
             WHERE link.source_id IN idx AND link.target_id IN idx
+              AND link.source_id != link.target_id
             ORDER BY link.source_id, link.target_id
         """
         cursor = self.get_sql_cursor(sql, col_map)
@@ -1252,6 +1258,8 @@ class Export:
             Columns: Source_DomainID, Source_Domain, Target_DomainID, Target_Domain,
             PairCount, EntailCount, NeutralCount, ContradictCount, AvgRelationScore, AvgConfidence.
             Uses canonical ordering (smaller domain ID first) to avoid duplicate edges.
+            Intra-domain pairs (same domain on both sides) are excluded: they
+            would render as self-loops in the domain graph.
             Results ordered by descending PairCount.
         """
         col_map = {
@@ -1280,6 +1288,7 @@ class Export:
             WHERE e1.land_id = ?
               AND e1.relevance >= ?
               AND e2.land_id = e1.land_id
+              AND e1.domain_id != e2.domain_id
               AND s.method IN ('nli', 'cosine', 'cosine_lsh')
             GROUP BY
               CASE WHEN e1.domain_id <= e2.domain_id THEN e1.domain_id ELSE e2.domain_id END,

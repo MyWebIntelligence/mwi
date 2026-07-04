@@ -784,6 +784,15 @@ class LandController:
 
         verb = 'Would' if dry_run else 'Done.'
         print(f'\n{verb} renamed: {totals["renamed"]}, merged: {totals["merged"]}')
+        if totals.get('collision_groups'):
+            print(f'  Collision groups (several variants -> same URL): '
+                  f'{totals["collision_groups"]}')
+        if totals.get('promoted'):
+            print(f'  Promoted variants (no canonical row existed): '
+                  f'{totals["promoted"]}')
+        if totals.get('backfilled'):
+            print(f'  Backfilled fields (merge -> empty canonical): '
+                  f'{totals["backfilled"]}')
         print(f'  Links remapped (incoming): {totals["remapped_in"]}')
         print(f'  Links dropped  (incoming): {totals["dropped_in"]}')
         print(f'  Links remapped (outgoing): {totals["remapped_out"]}')

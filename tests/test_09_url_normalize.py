@@ -479,6 +479,309 @@ class TestLandNormalizeCLI:
 
 
 # ────────────────────────────────────────────────────────────────────────
+# Groupes de collision : variantes convergeant vers une canonique absente
+# ────────────────────────────────────────────────────────────────────────
+
+class TestNormalizeCollisionPromotion:
+    """Quand plusieurs variantes normalisent vers la même URL canonique
+    absente de la base, une variante est promue (rename) et les autres
+    fusionnées dedans — jamais deux lignes avec la même URL."""
+
+    def _enable_dedup_rules(self, monkeypatch):
+        import settings
+        monkeypatch.setattr(settings, 'url_normalization',
+                            {'force_https': True, 'strip_www': True,
+                             'trailing_slash': 'strip'}, raising=False)
+
+    def _make_variants(self, fresh_db, canonical_row=False,
+                       a_fields=None, b_fields=None):
+        """Deux variantes http/www de la même page (URL canonique absente
+        sauf canonical_row=True)."""
+        m = fresh_db["model"]
+        land = m.Land.create(name=rand_name("col"), description="t", lang="fr")
+        d_www = m.Domain.get_or_create(name="www.collision.test")[0]
+        a = m.Expression.create(
+            land=land, domain=d_www, url="http://www.collision.test/p",
+            **{'depth': 0, **(a_fields or {})})
+        b = m.Expression.create(
+            land=land, domain=d_www, url="https://www.collision.test/p",
+            **{'depth': 0, **(b_fields or {})})
+        canonical = None
+        if canonical_row:
+            d_bare = m.Domain.get_or_create(name="collision.test")[0]
+            canonical = m.Expression.create(
+                land=land, domain=d_bare, url="https://collision.test/p",
+                depth=0)
+        return land, a, b, canonical
+
+    def _normalize(self, fresh_db, land):
+        controller = fresh_db["controller"]
+        core = fresh_db["core"]
+        ret = controller.LandController.normalize(core.Namespace(
+            name=land.name, dry_run=None,
+            reset_status=None, verbose=None, limit=0))
+        assert ret == 1
+
+    def test_collision_two_variants_no_canonical_single_row_remains(
+            self, fresh_db, monkeypatch):
+        self._enable_dedup_rules(monkeypatch)
+        m = fresh_db["model"]
+        land, a, b, _ = self._make_variants(fresh_db)
+        d_other = m.Domain.get_or_create(name="other.test")[0]
+        other = m.Expression.create(
+            land=land, domain=d_other, url="https://other.test/x", depth=0)
+        m.ExpressionLink.create(source=other, target=a)
+        m.ExpressionLink.create(source=other, target=b)
+
+        self._normalize(fresh_db, land)
+
+        survivors = list(m.Expression.select().where(
+            (m.Expression.land == land)
+            & (m.Expression.url == "https://collision.test/p")))
+        assert len(survivors) == 1
+        assert m.Expression.select().where(
+            m.Expression.land == land).count() == 2  # survivant + other
+        # les deux liens entrants convergent en UNE arête other -> survivant
+        assert m.ExpressionLink.select().where(
+            (m.ExpressionLink.source == other)
+            & (m.ExpressionLink.target == survivors[0])).count() == 1
+        assert m.ExpressionLink.select().where(
+            m.ExpressionLink.source == other).count() == 1
+
+    def test_collision_outgoing_links_remapped(self, fresh_db, monkeypatch):
+        self._enable_dedup_rules(monkeypatch)
+        m = fresh_db["model"]
+        land, a, b, _ = self._make_variants(
+            fresh_db, b_fields={'html': '<html>x</html>'})  # b sera promue
+        d_other = m.Domain.get_or_create(name="other.test")[0]
+        other = m.Expression.create(
+            land=land, domain=d_other, url="https://other.test/x", depth=0)
+        m.ExpressionLink.create(source=a, target=other)
+
+        self._normalize(fresh_db, land)
+
+        survivor = m.Expression.get(
+            (m.Expression.land == land)
+            & (m.Expression.url == "https://collision.test/p"))
+        assert survivor.id == b.id
+        assert m.ExpressionLink.select().where(
+            (m.ExpressionLink.source == survivor)
+            & (m.ExpressionLink.target == other)).exists()
+
+    def test_collision_with_existing_canonical_merges_all(
+            self, fresh_db, monkeypatch):
+        self._enable_dedup_rules(monkeypatch)
+        m = fresh_db["model"]
+        land, a, b, canonical = self._make_variants(fresh_db, canonical_row=True)
+
+        self._normalize(fresh_db, land)
+
+        assert not m.Expression.select().where(
+            m.Expression.id.in_([a.id, b.id])).exists()
+        assert m.Expression.select().where(
+            m.Expression.land == land).count() == 1
+        assert m.Expression.get_by_id(canonical.id).url == \
+            "https://collision.test/p"
+
+    def test_promotion_prefers_rich_expression(self, fresh_db, monkeypatch):
+        self._enable_dedup_rules(monkeypatch)
+        m = fresh_db["model"]
+        land, a, b, _ = self._make_variants(
+            fresh_db,
+            b_fields={'html': '<html>x</html>', 'readable': 'Contenu'})
+
+        self._normalize(fresh_db, land)
+
+        survivor = m.Expression.get(
+            (m.Expression.land == land)
+            & (m.Expression.url == "https://collision.test/p"))
+        assert survivor.id == b.id
+        assert survivor.original_url == "https://www.collision.test/p"
+        assert not m.Expression.select().where(
+            m.Expression.id == a.id).exists()
+
+    def test_promotion_tie_breaks_on_smallest_id(self, fresh_db, monkeypatch):
+        self._enable_dedup_rules(monkeypatch)
+        m = fresh_db["model"]
+        land, a, b, _ = self._make_variants(fresh_db)  # deux stubs identiques
+
+        self._normalize(fresh_db, land)
+
+        survivor = m.Expression.get(
+            (m.Expression.land == land)
+            & (m.Expression.url == "https://collision.test/p"))
+        assert survivor.id == a.id
+        assert not m.Expression.select().where(
+            m.Expression.id == b.id).exists()
+
+    def test_promotion_then_backfill_from_loser(self, fresh_db, monkeypatch):
+        """Synergie B1×B2 : la promue récupère les champs vides du perdant."""
+        self._enable_dedup_rules(monkeypatch)
+        m = fresh_db["model"]
+        land, a, b, _ = self._make_variants(
+            fresh_db,
+            a_fields={'title': 'Titre'},
+            b_fields={'html': '<html>x</html>'})  # b promue (html)
+
+        self._normalize(fresh_db, land)
+
+        survivor = m.Expression.get_by_id(b.id)
+        assert survivor.html == '<html>x</html>'
+        assert survivor.title == 'Titre'
+
+    def test_collision_run_idempotent(self, fresh_db, monkeypatch):
+        self._enable_dedup_rules(monkeypatch)
+        from mwi import normalize_pipeline
+        m = fresh_db["model"]
+        land, a, b, _ = self._make_variants(fresh_db)
+
+        self._normalize(fresh_db, land)
+        count_first = m.Expression.select().where(
+            m.Expression.land == land).count()
+
+        totals = normalize_pipeline.normalize_land(land)
+
+        assert totals['renamed'] == 0
+        assert totals['merged'] == 0
+        assert m.Expression.select().where(
+            m.Expression.land == land).count() == count_first == 1
+
+    def test_dry_run_counts_collision_groups_without_writes(
+            self, fresh_db, monkeypatch):
+        self._enable_dedup_rules(monkeypatch)
+        from mwi import normalize_pipeline
+        m = fresh_db["model"]
+        land, a, b, _ = self._make_variants(fresh_db)
+
+        totals = normalize_pipeline.normalize_land(land, dry_run=True)
+
+        assert totals['collision_groups'] >= 1
+        assert totals['promoted'] >= 1
+        assert totals['renamed'] + totals['merged'] == 2
+        # aucune écriture
+        assert m.Expression.select().where(
+            m.Expression.land == land).count() == 2
+        assert m.Expression.get_by_id(a.id).url == "http://www.collision.test/p"
+        assert m.Expression.get_by_id(b.id).url == "https://www.collision.test/p"
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Merge backfill: le canonique récupère le contenu du doublon si vide
+# ────────────────────────────────────────────────────────────────────────
+
+class TestNormalizeMergeBackfill:
+    """Au merge, les champs de contenu du doublon comblent les champs vides
+    du canonique (jamais d'écrasement d'un champ rempli)."""
+
+    def _make_pair(self, fresh_db, canonical_fields=None, duplicate_fields=None):
+        """Canonique propre + doublon archive de la même page (merge attendu)."""
+        m = fresh_db["model"]
+        land = m.Land.create(name=rand_name("bf"), description="t", lang="fr")
+        d_archive = m.Domain.get_or_create(name="web.archive.org")[0]
+        d_clean = m.Domain.get_or_create(name="example.com")[0]
+        canonical = m.Expression.create(
+            land=land, domain=d_clean, url="https://example.com/page1",
+            **{'depth': 0, **(canonical_fields or {})})
+        duplicate = m.Expression.create(
+            land=land, domain=d_archive,
+            url="https://web.archive.org/web/20230605/https://example.com/page1",
+            **{'depth': 1, **(duplicate_fields or {})})
+        return land, canonical, duplicate
+
+    def _normalize(self, fresh_db, land, reset_status=None):
+        controller = fresh_db["controller"]
+        core = fresh_db["core"]
+        ret = controller.LandController.normalize(core.Namespace(
+            name=land.name, dry_run=None,
+            reset_status=reset_status, verbose=None, limit=0))
+        assert ret == 1
+
+    def test_backfill_content_to_empty_canonical(self, fresh_db):
+        m = fresh_db["model"]
+        land, canonical, duplicate = self._make_pair(
+            fresh_db,
+            duplicate_fields={'html': '<html>H</html>', 'readable': 'Readable',
+                              'title': 'Titre'})
+
+        self._normalize(fresh_db, land)
+
+        assert not m.Expression.select().where(
+            m.Expression.id == duplicate.id).exists()
+        merged = m.Expression.get_by_id(canonical.id)
+        assert merged.html == '<html>H</html>'
+        assert merged.readable == 'Readable'
+        assert merged.title == 'Titre'
+
+    def test_backfill_does_not_overwrite_filled_canonical(self, fresh_db):
+        m = fresh_db["model"]
+        land, canonical, _ = self._make_pair(
+            fresh_db,
+            canonical_fields={'title': 'T1', 'readable': 'R1'},
+            duplicate_fields={'title': 'T2', 'readable': 'R2',
+                              'html': '<html>H</html>'})
+
+        self._normalize(fresh_db, land)
+
+        merged = m.Expression.get_by_id(canonical.id)
+        assert merged.title == 'T1'
+        assert merged.readable == 'R1'
+        assert merged.html == '<html>H</html>'
+
+    def test_backfill_validllm_pair_moves_together(self, fresh_db):
+        m = fresh_db["model"]
+        land, canonical, _ = self._make_pair(
+            fresh_db,
+            duplicate_fields={'validllm': 'oui', 'validmodel': 'org/model'})
+
+        self._normalize(fresh_db, land)
+
+        merged = m.Expression.get_by_id(canonical.id)
+        assert merged.validllm == 'oui'
+        assert merged.validmodel == 'org/model'
+
+    def test_merge_depth_takes_min(self, fresh_db):
+        m = fresh_db["model"]
+        land, canonical, _ = self._make_pair(
+            fresh_db,
+            canonical_fields={'depth': 3},
+            duplicate_fields={'depth': 1})
+
+        self._normalize(fresh_db, land)
+
+        assert m.Expression.get_by_id(canonical.id).depth == 1
+
+    def test_merge_relevance_untouched(self, fresh_db):
+        """relevance n'est jamais backfillée : land consolidate la recale."""
+        m = fresh_db["model"]
+        land, canonical, _ = self._make_pair(
+            fresh_db,
+            canonical_fields={'relevance': 0},
+            duplicate_fields={'relevance': 7})
+
+        self._normalize(fresh_db, land)
+
+        assert m.Expression.get_by_id(canonical.id).relevance == 0
+
+    def test_backfill_skips_status_fields_when_reset_status(self, fresh_db):
+        """--reset-status : ne pas réintroduire http_status/fetched_at par
+        backfill (le reset des renames serait annulé par le merge)."""
+        import datetime
+        m = fresh_db["model"]
+        land, canonical, _ = self._make_pair(
+            fresh_db,
+            duplicate_fields={'http_status': '200',
+                              'fetched_at': datetime.datetime.now(),
+                              'title': 'Titre'})
+
+        self._normalize(fresh_db, land, reset_status='TRUE')
+
+        merged = m.Expression.get_by_id(canonical.id)
+        assert merged.http_status is None
+        assert merged.fetched_at is None
+        assert merged.title == 'Titre'  # le backfill de contenu reste actif
+
+
+# ────────────────────────────────────────────────────────────────────────
 # Migration 008
 # ────────────────────────────────────────────────────────────────────────
 

@@ -648,6 +648,53 @@ class TestPseudolinksExport:
             assert "Target_DomainID" in rows[0]
             assert "PairCount" in rows[0]
 
+    def test_pseudolinksdomain_excludes_intra_domain(self, land_with_similarities):
+        """Une paire de paragraphes du même domaine ne produit jamais de
+        self-loop domaine→lui-même ; l'arête inter-domaine reste exportée."""
+        controller = land_with_similarities["controller"]
+        core = land_with_similarities["core"]
+        model = land_with_similarities["model"]
+        land = land_with_similarities["land"]
+        name = land_with_similarities["name"]
+        data_dir = str(land_with_similarities["data_dir"])
+
+        # La fixture (3 expressions sur example.com) a déjà produit des paires
+        # intra-domaine. On ajoute une expression sur un second domaine et une
+        # paire inter-domaines créée à la main.
+        domain2 = model.Domain.create(name="other.org")
+        expr_ext = model.Expression.create(
+            land=land, domain=domain2, url="https://other.org/page",
+            readable="External paragraph. " * 20, relevance=1,
+            fetched_at=datetime.now(), readable_at=datetime.now(),
+        )
+        para_local = (model.Paragraph.select()
+                      .join(model.Expression)
+                      .where(model.Expression.land == land)
+                      .first())
+        para_ext = model.Paragraph.create(
+            expression=expr_ext, domain=domain2, para_index=0,
+            text="External paragraph.", text_hash="f" * 64,
+        )
+        model.ParagraphSimilarity.create(
+            source_paragraph=para_local, target_paragraph=para_ext,
+            method="cosine", score=1, score_raw=0.9,
+        )
+
+        ret = controller.LandController.export(
+            core.Namespace(name=name, type="pseudolinksdomain", minrel=0)
+        )
+
+        assert ret == 1
+        csv_file = sorted(glob.glob(
+            os.path.join(data_dir, f"*{name}*pseudolinksdomain*")))[-1]
+        with open(csv_file, "r", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        assert all(r["Source_DomainID"] != r["Target_DomainID"] for r in rows)
+        pairs = {(r["Source_DomainID"], r["Target_DomainID"]) for r in rows}
+        d_local = str(model.Domain.get(model.Domain.name == "example.com").id)
+        d_ext = str(domain2.id)
+        assert (d_local, d_ext) in pairs or (d_ext, d_local) in pairs
+
 
 class TestEmbeddingCheck:
     """Tests for embedding environment check."""
