@@ -67,8 +67,9 @@ def _collect_pairs(land: model.Land) -> Tuple[List[Tuple[int, str, str, bool]],
     Only planning columns are selected (ids, urls, presence flags) — the
     html/readable payloads of the whole land are never materialized in RAM.
     Rows already holding their canonical URL are stable (normalize_url is
-    idempotent) and never appear in a group. Limitation: two rows sharing
-    the SAME already-canonical URL are left untouched.
+    idempotent) and never appear in a variant group; when SEVERAL rows share
+    the same already-canonical URL (legacy exact duplicates), the richest one
+    is kept and its siblings are merged into it.
     """
     Expr = model.Expression
     rows = list(Expr.select(
@@ -79,7 +80,10 @@ def _collect_pairs(land: model.Land) -> Tuple[List[Tuple[int, str, str, bool]],
         Expr.relevance, Expr.fetched_at,
     ).where(Expr.land == land).dicts())
 
-    url_to_row: Dict[str, Dict] = {r['url']: r for r in rows}
+    by_url: Dict[str, List[Dict]] = {}
+    for r in rows:
+        by_url.setdefault(r['url'], []).append(r)
+    url_to_row: Dict[str, Dict] = {u: rs[0] for u, rs in by_url.items()}
 
     groups: Dict[str, List[Dict]] = {}
     for r in rows:
@@ -90,6 +94,20 @@ def _collect_pairs(land: model.Land) -> Tuple[List[Tuple[int, str, str, bool]],
     to_rename: List[Tuple[int, str, str, bool]] = []
     to_merge: List[Tuple[int, str, int, str]] = []
     collision_groups = 0
+
+    # Legacy exact duplicates of an already-canonical URL: keep the richest
+    # row, merge its siblings into it. Rows whose URL still changes are
+    # covered by the variant groups below.
+    for url, dup_rows in by_url.items():
+        if len(dup_rows) < 2 or normalize_url(url) != url:
+            continue
+        winner = max(dup_rows, key=_promotion_key)
+        url_to_row[url] = winner   # variant merges must target the winner
+        for m_row in dup_rows:
+            if m_row['id'] != winner['id']:
+                to_merge.append((m_row['id'], m_row['url'],
+                                 winner['id'], url))
+        collision_groups += 1
 
     for new_url, members in groups.items():
         holder = url_to_row.get(new_url)

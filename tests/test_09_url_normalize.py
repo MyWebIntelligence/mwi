@@ -646,6 +646,36 @@ class TestNormalizeCollisionPromotion:
         assert m.Expression.select().where(
             m.Expression.land == land).count() == count_first == 1
 
+    def test_exact_duplicate_canonical_rows_merged(self, fresh_db, monkeypatch):
+        """Deux lignes partageant la MÊME URL déjà canonique sont fusionnées
+        (la plus riche survit) — l'ancienne limitation est levée."""
+        self._enable_dedup_rules(monkeypatch)
+        m = fresh_db["model"]
+        land = m.Land.create(name=rand_name("dup"), description="t", lang="fr")
+        d = m.Domain.get_or_create(name="collision.test")[0]
+        stub = m.Expression.create(land=land, domain=d,
+                                   url="https://collision.test/p", depth=0)
+        rich = m.Expression.create(land=land, domain=d,
+                                   url="https://collision.test/p", depth=0,
+                                   html='<html>x</html>')
+        d_other = m.Domain.get_or_create(name="other.test")[0]
+        other = m.Expression.create(land=land, domain=d_other,
+                                    url="https://other.test/x", depth=0)
+        m.ExpressionLink.create(source=other, target=stub)
+
+        self._normalize(fresh_db, land)
+
+        survivors = list(m.Expression.select().where(
+            (m.Expression.land == land)
+            & (m.Expression.url == "https://collision.test/p")))
+        assert len(survivors) == 1
+        assert survivors[0].id == rich.id
+        assert not m.Expression.select().where(
+            m.Expression.id == stub.id).exists()
+        assert m.ExpressionLink.select().where(
+            (m.ExpressionLink.source == other)
+            & (m.ExpressionLink.target == rich.id)).exists()
+
     def test_dry_run_counts_collision_groups_without_writes(
             self, fresh_db, monkeypatch):
         self._enable_dedup_rules(monkeypatch)

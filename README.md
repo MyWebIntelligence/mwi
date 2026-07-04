@@ -1100,10 +1100,11 @@ python mywi.py land normalize --name=LAND_NAME
 python mywi.py land consolidate --name=LAND_NAME
 ```
 
-Known limits: `https://site.com` and `https://site.com/` do not converge
-(the root slash is preserved by the `strip` policy); two rows already
-sharing the same canonical URL are left untouched; with `--limit` a group
-may be processed partially (re-runs converge). On very large databases
+Legacy exact duplicates (several rows already sharing the same canonical
+URL) are also collapsed: the richest row survives, its siblings are merged
+into it. Known limits: `https://site.com` and `https://site.com/` do not
+converge (the root slash is preserved by the `strip` policy); with
+`--limit` a group may be processed partially (re-runs converge). On very large databases
 prefer running on a local copy (SQLite I/O on cloud-synced drives is
 slow), then move the file back.
 
