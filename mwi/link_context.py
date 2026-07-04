@@ -31,7 +31,7 @@ import re
 import warnings
 from dataclasses import dataclass
 from typing import Dict, Optional
-from urllib.parse import urldefrag, urljoin
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import settings
 
@@ -407,3 +407,88 @@ def extract_markdown_links(md_content: Optional[str],
     except Exception:
         return out
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Tolerant URL resolution — 3-key ladder (sprint dedup-selfloops)              #
+# --------------------------------------------------------------------------- #
+# Same ladder as the fullhtml export: exact normalize_url, then relaxed
+# (lowercase, no trailing slash), then host+path (scheme/www-insensitive).
+# Used by consolidate to resolve readable links onto EXISTING corpus
+# expressions instead of creating URL-variant duplicates.
+
+def host_path_key(url: str) -> Optional[str]:
+    """Scheme-and-www-insensitive key: host(no www) + path + query.
+
+    Absorbs http<->https / www<->bare divergences when force_https /
+    strip_www are OFF. Returns None on failure / no host.
+    """
+    try:
+        parsed = urlparse(url)
+        host = (parsed.netloc or '').lower()
+        if host.startswith('www.'):
+            host = host[4:]
+        if not host:
+            return None
+        key = host + (parsed.path or '').rstrip('/')
+        if parsed.query:
+            key += '?' + parsed.query
+        return key
+    except Exception:
+        return None
+
+
+def add_to_url_index(index: tuple, eid: int, url: str) -> None:
+    """Index one expression URL under the 3 keys.
+
+    A key already mapped to a DIFFERENT id becomes None (ambiguous ->
+    unusable for lookup, never a wrong match).
+    """
+    exact, relaxed, by_host_path = index
+    try:
+        norm = normalize_url(url) if url else url
+    except Exception:
+        norm = url
+    if not norm:
+        return
+    for table, key in ((exact, norm),
+                       (relaxed, norm.lower().rstrip('/')),
+                       (by_host_path, host_path_key(norm))):
+        if not key:
+            continue
+        if key in table:
+            if table[key] != eid:
+                table[key] = None
+        else:
+            table[key] = eid
+
+
+def build_url_index(pairs) -> tuple:
+    """Build the 3-key URL index from (expression_id, url) pairs."""
+    index = ({}, {}, {})
+    for eid, url in pairs:
+        add_to_url_index(index, eid, url)
+    return index
+
+
+def resolve_url_in_index(index: tuple, href: str) -> Optional[int]:
+    """Resolve a href to an indexed expression id. None on miss/ambiguous."""
+    exact, relaxed, by_host_path = index
+    try:
+        norm = normalize_url(href)
+    except Exception:
+        norm = href
+    if not norm:
+        return None
+    eid = exact.get(norm)
+    if eid is not None:
+        return eid
+    eid = relaxed.get(norm.lower().rstrip('/'))
+    if eid is not None:
+        return eid
+    key = host_path_key(norm)
+    if key is not None:
+        eid = by_host_path.get(key)
+        if eid is not None:
+            return eid
+    return None

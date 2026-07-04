@@ -1847,6 +1847,10 @@ async def consolidate_land(
           honoured, None => settings.openrouter_issue_mode) and refreshes
           validllm/validmodel before applying the verdict.
         - Deletes and recreates all expression links from content.
+        - Resolves URL variants (http/https, www, trailing slash) onto the
+          EXISTING corpus expression via the 3-key ladder (sprint
+          dedup-selfloops) instead of creating duplicate rows; a link to a
+          variant of the page itself never creates a self-loop.
         - Extracts and analyzes media from existing content.
         - Useful for repairing data after manual content edits or dictionary updates.
         - Does not re-fetch URLs; works with existing content in the database.
@@ -1871,6 +1875,13 @@ async def consolidate_land(
 
     total_processed = 0
     total_errors = 0
+
+    # 3-key URL index of the whole land: readable links are resolved onto
+    # existing expressions (variant-proof) before any creation. Expressions
+    # created during the run are appended to the index.
+    url_index = link_context.build_url_index(
+        model.Expression.select(model.Expression.id, model.Expression.url)
+        .where(model.Expression.land == land).tuples())
 
     batch_size = settings.parallel_connections
     expression_count = query.count()
@@ -1935,22 +1946,34 @@ async def consolidate_land(
                 dom_map = link_context.extract_link_dom_map(
                     stored_html, str(expr.url)) if stored_html else {}
                 for url in set(links):
-                    if is_crawlable(url):
+                    # variant-proof: resolve onto an existing corpus fiche
+                    # (http/https, www, trailing slash absorbed) before
+                    # falling back to creation.
+                    target_id = link_context.resolve_url_in_index(url_index, url)
+                    if target_id is None:
+                        if not is_crawlable(url):
+                            continue
                         target_expr = add_expression(land, url, expr.depth + 1 if expr.depth is not None else 1)
-                        if target_expr:
-                            info = link_context.lookup_link_info(dom_map, url)
-                            ctx = link_context.extract_md_paragraph(expr.readable, url)
-                            if ctx is None and info is not None:
-                                ctx = info.block_text
-                            try:
-                                model.ExpressionLink.create(
-                                    source_id=expr.id, # type: ignore
-                                    target_id=target_expr.id, # type: ignore
-                                    context=ctx,
-                                    dom=info.dom if info else None,
-                                    dom_html=info.dom_html if info else None)
-                            except IntegrityError:
-                                pass
+                        if not target_expr:
+                            continue
+                        target_id = target_expr.id  # type: ignore
+                        link_context.add_to_url_index(
+                            url_index, target_id, str(target_expr.url))
+                    if target_id == expr.id:
+                        continue  # self-citation (permalink/variant) -> no self-loop
+                    info = link_context.lookup_link_info(dom_map, url)
+                    ctx = link_context.extract_md_paragraph(expr.readable, url)
+                    if ctx is None and info is not None:
+                        ctx = info.block_text
+                    try:
+                        model.ExpressionLink.create(
+                            source_id=expr.id, # type: ignore
+                            target_id=target_id,
+                            context=ctx,
+                            dom=info.dom if info else None,
+                            dom_html=info.dom_html if info else None)
+                    except IntegrityError:
+                        pass
 
                 # 5. Extraire et recréer les médias
                 nb_media = 0

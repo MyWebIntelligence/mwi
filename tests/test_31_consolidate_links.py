@@ -79,6 +79,94 @@ class TestConsolidateRelativeLinks:
         assert any(t.endswith("/article/5") for t in targets), targets
 
 
+class TestConsolidateVariantResolution:
+    """Sprint dedup-selfloops : consolidate résout les variantes d'URL
+    (http/https, www, slash final) vers la fiche existante du corpus au lieu
+    de créer une fiche-doublon, et ne crée jamais de self-loop."""
+
+    def test_variant_link_resolves_to_existing_expression(self, fresh_db):
+        m = fresh_db["model"]
+        core = fresh_db["core"]
+
+        land = m.Land.create(name="vr_land", description="t", lang="fr")
+        d_src = m.Domain.create(name="source.test")
+        d_tgt = m.Domain.create(name="target.test")
+        target = m.Expression.create(
+            land=land, domain=d_tgt, url="https://target.test/page", depth=0)
+        readable = ("Voir [la page](http://www.target.test/page/) pour le "
+                    "détail.\n\nFin.")
+        src = _make_expr(m, land, d_src, "https://source.test/a", readable)
+        count_before = m.Expression.select().where(
+            m.Expression.land == land).count()
+
+        run(core.consolidate_land(land))
+
+        # le lien pointe vers la fiche existante, aucune fiche-doublon créée
+        assert m.ExpressionLink.select().where(
+            (m.ExpressionLink.source == src.id)
+            & (m.ExpressionLink.target == target.id)).exists()
+        assert m.Expression.select().where(
+            m.Expression.land == land).count() == count_before
+
+    def test_self_variant_link_creates_no_self_loop(self, fresh_db):
+        m = fresh_db["model"]
+        core = fresh_db["core"]
+
+        land = m.Land.create(name="vr_self", description="t", lang="fr")
+        domain = m.Domain.create(name="self.test")
+        readable = ("Permalien : [cet article](http://www.self.test/article/)"
+                    "\n\nFin.")
+        src = _make_expr(m, land, domain,
+                         "https://self.test/article", readable)
+
+        run(core.consolidate_land(land))
+
+        assert not m.ExpressionLink.select().where(
+            m.ExpressionLink.source == src.id).exists()
+        assert m.Expression.select().where(
+            m.Expression.land == land).count() == 1
+
+    def test_unknown_url_still_creates_new_expression(self, fresh_db):
+        """Non-régression : une URL absente du corpus crée bien une fiche."""
+        m = fresh_db["model"]
+        core = fresh_db["core"]
+
+        land = m.Land.create(name="vr_new", description="t", lang="fr")
+        domain = m.Domain.create(name="source.test")
+        readable = "Voir [ailleurs](https://brandnew.test/x).\n\nFin."
+        src = _make_expr(m, land, domain, "https://source.test/a", readable)
+
+        run(core.consolidate_land(land))
+
+        targets = _targets_of(m, src.id)
+        assert any(t.endswith("brandnew.test/x") for t in targets), targets
+
+    def test_variant_of_newly_created_target_reuses_it(self, fresh_db):
+        """Deux sources citant deux variantes de la même URL nouvelle ->
+        une seule fiche créée, les deux arêtes convergent dessus."""
+        m = fresh_db["model"]
+        core = fresh_db["core"]
+
+        land = m.Land.create(name="vr_intra", description="t", lang="fr")
+        domain = m.Domain.create(name="source.test")
+        src1 = _make_expr(m, land, domain, "https://source.test/a",
+                          "Voir [x](https://new.test/p).\n\nFin.")
+        src2 = _make_expr(m, land, domain, "https://source.test/b",
+                          "Voir [x](http://www.new.test/p/).\n\nFin.")
+
+        run(core.consolidate_land(land))
+
+        created = list(m.Expression.select().where(
+            (m.Expression.land == land)
+            & (m.Expression.url.contains("new.test"))))
+        assert len(created) == 1
+        target_id = created[0].id
+        for src in (src1, src2):
+            assert m.ExpressionLink.select().where(
+                (m.ExpressionLink.source == src.id)
+                & (m.ExpressionLink.target == target_id)).exists()
+
+
 class TestConsolidateNoCorruption:
     """Family A non-regression: clean, non-truncated targets after consolidate."""
 
